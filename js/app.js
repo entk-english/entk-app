@@ -507,8 +507,8 @@ async function planDialog(t, sessions) {
     '<h2>Plan today\'s session</h2>' +
     '<p class="sub">' + esc(t.name) + ' · ' + esc(LEVEL_LABEL[t.level] || t.level) + '. Everything below can still be changed live.</p>' +
     '<div class="field"><label>Stage 4 — quick round</label><select id="p-stage4">' +
-      '<option value="sentence">Sentence Builder Game (default)</option>' +
-      OPTIONAL_DRILLS.map(d => '<option value="' + d.id + '">' + esc(d.name) + ' (instead of Sentence Builder)</option>').join('') +
+      OPTIONAL_DRILLS.map((d, i) => '<option value="' + d.id + '"' + (i === 0 ? ' selected' : '') + '>' +
+        esc(d.name) + (i === 0 ? ' (default)' : '') + '</option>').join('') +
     '</select></div>' +
     '<div class="field"><label>Extra rounds — tap to add, they are off unless you pick them</label><div class="chips" id="p-extra">' +
       OPTIONAL_DRILLS.map(d => '<span class="chip gold" data-x="' + d.id + '">' + esc(d.name) + '</span>').join('') +

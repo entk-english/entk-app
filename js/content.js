@@ -17,7 +17,7 @@ export const LEVEL_LABEL = {
 
 /* -------------------------------------------------------------
    STAGE 1 — WARM-UP
-   Four rotating formats. The session picks the next format in the
+   Three rotating formats. The session picks the next format in the
    rotation based on how many sessions the trainee has already had,
    so nobody gets the same opener twice in a row.
    ------------------------------------------------------------- */
@@ -101,44 +101,6 @@ export const PRON_FALLBACK = {
   B2: ['inevitably', 'entrepreneur', 'hierarchy', 'anonymous', 'deteriorate', 'infrastructure', 'sophisticated', 'phenomenon'],
   C1: ['unequivocally', 'anaesthetist', 'juxtaposition', 'idiosyncratic', 'quintessential', 'epitome', 'paradigm', 'colloquial'],
   C2: ['otorhinolaryngology', 'antidisestablishment', 'phenomenological', 'incontrovertibly', 'onomatopoeia', 'sesquipedalian', 'archetypal', 'hegemonic']
-};
-
-/* -------------------------------------------------------------
-   STAGE 4 — SENTENCE BUILDER PRE-LOADED SETS
-   Each set feeds straight into the sentence-structure game.
-   ------------------------------------------------------------- */
-
-export const SENTENCE_SETS = {
-  A1: [
-    { label: 'Word order', lines: ['The cat drinks the milk', 'My sister works in a shop'] },
-    { label: 'Daily routine', lines: ['I get up at seven', 'We eat dinner together'] },
-    { label: 'Simple questions', lines: ['Where do you live', 'What is your name'] }
-  ],
-  A2: [
-    { label: 'Past simple', lines: ['She walked to school yesterday', 'They played football last night'] },
-    { label: 'Going to', lines: ['I am going to visit my aunt', 'We are going to move next year'] },
-    { label: 'Adjectives', lines: ['I saw a big red house', 'She bought a lovely old table'] }
-  ],
-  B1: [
-    { label: 'Present perfect', lines: ['I have never been to Japan', 'She has already finished the report'] },
-    { label: 'Connectors', lines: ['I like tea but not coffee', 'He was tired so he went to bed'] },
-    { label: 'Relative clauses', lines: ['The man who called you is waiting', 'This is the book that changed everything'] }
-  ],
-  B2: [
-    { label: 'Conditionals', lines: ['If I had known I would have called', 'She would apply if the salary were better'] },
-    { label: 'Passive voice', lines: ['The decision was made without us', 'The results are being reviewed today'] },
-    { label: 'Reported speech', lines: ['He said he had already sent it', 'They asked whether we could delay the launch'] }
-  ],
-  C1: [
-    { label: 'Inversion', lines: ['Rarely have I seen such a response', 'Not only did she resign but she published everything'] },
-    { label: 'Cleft sentences', lines: ['What surprised me was the timing', 'It was the silence that worried everyone'] },
-    { label: 'Participle clauses', lines: ['Having reviewed the data we changed course', 'Faced with the deadline the team split the work'] }
-  ],
-  C2: [
-    { label: 'Concession and nuance', lines: ['Much as I admire the ambition the method is unsound', 'For all its elegance the argument proves nothing'] },
-    { label: 'Hedged assertion', lines: ['The evidence would appear to suggest a weaker link', 'One might reasonably conclude that the effect is negligible'] },
-    { label: 'Formal inversion', lines: ['Were the funding withdrawn the project would collapse', 'Little did the committee realise how contested it was'] }
-  ]
 };
 
 /* -------------------------------------------------------------

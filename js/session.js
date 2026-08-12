@@ -10,14 +10,13 @@
 import { Store } from './store.js';
 import { UNSPLASH_ACCESS_KEY } from './config.js';
 import {
-  WARMUP_FORMATS, WARMUPS, TOPICS, PRON_FALLBACK, SENTENCE_SETS,
+  WARMUP_FORMATS, WARMUPS, TOPICS, PRON_FALLBACK,
   WORD_FORMS, EXPANSIONS, EXPANSION_STEPS, PICTURE_QUERIES, PICTURE_PROMPTS,
   FILLERS, ERROR_TYPES, LEVEL_LABEL, forLevel, pickOne
 } from './content.js';
 import { esc, el, $, $$, toast, modal, confirmBox, copyText, downloadText, fmtDate } from './ui.js';
 
 const DRILL_NAMES = {
-  sentence: 'Sentence Builder',
   wordform: 'Word Form Drill',
   expansion: 'Sentence Expansion',
   picture: 'Picture Description'
@@ -73,17 +72,23 @@ const STAGE_META = {
   harvest: { title: 'Free Talk / Error Harvest', target: 270, blurb: 'Sixty seconds of unbroken speech, then you log what you heard.' },
   pron: { title: 'Pronunciation Boxing', target: 600, blurb: 'The words harvested a minute ago are now the boss fight.' },
   stage4: { title: 'Quick Round', target: 150, blurb: 'Short and sharp. Do not let this become a long drill.' },
-  sentence: { title: 'Sentence Builder', target: 150, blurb: 'Quick round — question, then build the answer.' },
   wordform: { title: 'Word Form Drill', target: 180, blurb: 'Noun, infinitive, past, adjective.' },
   expansion: { title: 'Sentence Expansion', target: 180, blurb: 'What, when, where, why — one at a time.' },
   picture: { title: 'Picture Description', target: 120, blurb: '60 to 90 seconds of description, then follow-ups.' },
   feedback: { title: 'Feedback Note', target: 90, blurb: 'Read it out, then send it to the trainee.' }
 };
 
+/* Sessions planned before the sentence game was removed still carry
+   stage4:'sentence', so it maps onto the word form drill instead. */
+function quickRoundKind() {
+  const kind = S.plan.stage4;
+  return (!kind || kind === 'sentence') ? 'wordform' : kind;
+}
+
 function meta(stage) {
   if (stage === 'stage4') {
-    const kind = S.plan.stage4 || 'sentence';
-    return Object.assign({}, STAGE_META[kind === 'sentence' ? 'stage4' : kind], { title: DRILL_NAMES[kind] });
+    const kind = quickRoundKind();
+    return Object.assign({}, STAGE_META[kind], { title: DRILL_NAMES[kind] });
   }
   return STAGE_META[stage] || { title: stage, target: 120, blurb: '' };
 }
@@ -143,8 +148,7 @@ function draw() {
     const options = [
       ['picture', 'Picture Description'],
       ['wordform', 'Word Form Drill'],
-      ['expansion', 'Sentence Expansion'],
-      ['sentence', 'Sentence Builder']
+      ['expansion', 'Sentence Expansion']
     ];
     const chosen = await modal(
       '<h2>Add a drill</h2><p class="sub">It slots in straight after the stage you are on.</p>' +
@@ -182,7 +186,6 @@ function draw() {
     harvest: stageHarvest,
     pron: stagePron,
     stage4: stageQuickRound,
-    sentence: stageSentence,
     wordform: stageWordForm,
     expansion: stageExpansion,
     picture: stagePicture,
@@ -477,73 +480,18 @@ function onGameMessage(event) {
     const weak = (msg.results || []).filter(r => r.pct < 85).map(r => r.word);
     if (weak.length) toast('Still shaky: ' + weak.join(', '), 'info');
   }
-  if (msg.game === 'sentence') {
-    S.data.stage4 = Object.assign({}, S.data.stage4, {
-      kind: 'sentence',
-      score: msg.score,
-      built: msg.built,
-      summary: (msg.built || []).length + ' sentence(s) built · ' + (msg.mistakes || 0) + ' mistakes'
-    });
-  }
   persist();
 }
 
 /* =============================================================
-   STAGE 4 — QUICK ROUND (sentence builder by default)
+   STAGE 4 — QUICK ROUND
    ============================================================= */
 
 function stageQuickRound(body) {
-  const kind = S.plan.stage4 || 'sentence';
-  if (kind === 'wordform') return stageWordForm(body);
+  const kind = quickRoundKind();
   if (kind === 'expansion') return stageExpansion(body);
   if (kind === 'picture') return stagePicture(body);
-  return stageSentence(body);
-}
-
-function stageSentence(body) {
-  const sets = forLevel(SENTENCE_SETS, S.trainee.level);
-  const saved = S.data.stage4 && S.data.stage4.kind === 'sentence' ? S.data.stage4 : null;
-
-  const setup = el(
-    '<div class="card">' +
-      '<div class="grid two">' +
-        '<div class="field"><label>Question you ask out loud</label>' +
-          '<input id="q-in" placeholder="e.g. What did you do at the weekend?" value="' + esc((saved && saved.question) || '') + '"></div>' +
-        '<div class="field"><label>Answer sentence the trainee builds — put your 3 target words in it</label>' +
-          '<input id="s-in" placeholder="e.g. I visited my cousin on Saturday" value="' + esc((saved && saved.line) || '') + '"></div>' +
-      '</div>' +
-      '<div class="eyebrow">Pre-loaded sets for ' + esc(S.trainee.level) + '</div>' +
-      '<div class="chips" id="ss"></div>' +
-      '<div class="row" style="margin-top:16px"><button class="btn" data-launch>Load into the game</button>' +
-      '<span class="sub" style="margin:0">Keep it to one quick round.</span></div>' +
-    '</div>'
-  );
-  body.appendChild(setup);
-
-  sets.forEach(set => {
-    const chip = el('<span class="chip">' + esc(set.label) + '</span>');
-    chip.onclick = () => { $('#s-in', setup).value = set.lines.join(' | '); };
-    $('#ss', setup).appendChild(chip);
-  });
-
-  const holder = el('<div></div>');
-  body.appendChild(holder);
-
-  function launch() {
-    const question = $('#q-in', setup).value.trim();
-    const raw = $('#s-in', setup).value.trim();
-    const lines = raw.split('|').map(s => s.trim()).filter(Boolean);
-    if (!lines.length) { toast('Type the answer sentence first, or pick a set.', 'err'); return; }
-    S.data.stage4 = Object.assign({ kind: 'sentence' }, S.data.stage4, { question, line: raw });
-    holder.innerHTML = '';
-    if (question) holder.appendChild(el('<div class="prompt-box small" style="margin-bottom:14px">' + esc(question) + '</div>'));
-    holder.appendChild(el('<iframe class="gameframe" src="games/sentence.html#s=' +
-      encodeURIComponent(b64({ s: lines })) + '"></iframe>'));
-    persist();
-  }
-
-  $('[data-launch]', setup).onclick = launch;
-  if (saved && saved.line) launch();
+  return stageWordForm(body);
 }
 
 /* =============================================================

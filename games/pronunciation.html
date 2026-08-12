@@ -88,6 +88,17 @@
     white-space:nowrap;transition:background .15s;}
   .miniBtn:hover{background:rgba(255,255,255,0.16);}
   .miniBtn:disabled{opacity:0.35;cursor:not-allowed;}
+  /* The trainer's verdict is the real score, so it gets real estate. */
+  #markRow{display:flex;gap:10px;align-items:center;justify-content:center;margin-top:11px;flex-wrap:wrap;}
+  #markRow .markLabel{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700;}
+  .markBtn{border:none;border-radius:11px;padding:11px 22px;font-size:15px;font-weight:800;
+    cursor:pointer;font-family:inherit;transition:transform .06s,box-shadow .06s,filter .15s;}
+  .markBtn:active{transform:translateY(3px);}
+  .markBtn:disabled{opacity:.35;cursor:not-allowed;}
+  .markBtn.good{background:linear-gradient(180deg,#8ffcd0,#3fae7f);color:#06251a;box-shadow:0 4px 0 #2b8a64;}
+  .markBtn.good:active{box-shadow:0 1px 0 #2b8a64;}
+  .markBtn.bad{background:linear-gradient(180deg,#ff9aa8,#d63a51);color:#2c0209;box-shadow:0 4px 0 #93202f;}
+  .markBtn.bad:active{box-shadow:0 1px 0 #93202f;}
   #micHelp{text-align:center;font-size:12px;color:var(--muted);margin-top:7px;
     display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;}
   #micHelp label{display:flex;gap:5px;align-items:center;cursor:pointer;}
@@ -161,6 +172,11 @@
       </div>
     </div>
     <div id="statusLine">Click the mic and say the word out loud</div>
+    <div id="markRow">
+      <span class="markLabel">Trainer marks it:</span>
+      <button class="markBtn good" id="markGood" title="Pronounced well — land the hit">✓ Good</button>
+      <button class="markBtn bad" id="markBad" title="Not right yet — no hit">✗ Needs work</button>
+    </div>
     <div id="micHelp">
       <label><input type="checkbox" id="recToggle" checked> Record my voice for playback</label>
       <span id="speechMode"></span>
@@ -808,14 +824,50 @@ function handleAttempt(pct, heard){
   applyResult(state.bestPct, heard, entry);
 }
 
-function applyResult(pct, heard, entry){
+/* ------------------------------------------------------------
+   TRAINER MARKING
+   The recognizer transcribes; it does not judge. Its language model
+   snaps a mispronounced word onto the nearest real one, so a poor
+   flap-t still comes back spelled correctly. Real phoneme scoring
+   needs a paid API, so the ear in the room decides instead: the
+   recognizer's guess stays on screen as a hint, and this is what
+   actually lands the hit and goes into the record.
+   ------------------------------------------------------------ */
+function markManually(good){
+  if(state.busy || !state.running) return;
+  if(listening){ try{ recognition.stop(); }catch(e){} stopListening(); }
+  micBtn.classList.remove('retry');
+  applyResult(good ? 96 : 30, state.lastHeard || '', current(), true);
+}
+
+(function wireMarking(){
+  const g = document.getElementById('markGood'), b = document.getElementById('markBad');
+  if(g) g.onclick = ()=>markManually(true);
+  if(b) b.onclick = ()=>markManually(false);
+  /* keyboard is faster than aiming a mouse while talking */
+  document.addEventListener('keydown', e=>{
+    if(!state.running || state.busy) return;
+    if(e.target && /input|textarea/i.test(e.target.tagName)) return;
+    if(e.key==='1' || e.key.toLowerCase()==='g'){ e.preventDefault(); markManually(true); }
+    if(e.key==='2' || e.key.toLowerCase()==='b'){ e.preventDefault(); markManually(false); }
+  });
+})();
+
+function setMarkingEnabled(on){
+  const g = document.getElementById('markGood'), b = document.getElementById('markBad');
+  if(g) g.disabled = !on;
+  if(b) b.disabled = !on;
+}
+
+function applyResult(pct, heard, entry, manual){
   entry = entry || current();
   const stars = starsFor(pct);
-  const why = stars===0 ? diagnose(entry.word, heard) : null;
+  const why = stars===0 && !manual ? diagnose(entry.word, heard) : null;
   state.results.push({ word:entry.word, pct, stars, rule:entry.rule,
                        isVocab:!!entry.isVocab, meaning:entry.meaning||'',
-                       attempts:state.attempt, heard, why });
+                       attempts:state.attempt, heard, why, manual:!!manual });
   state.busy = true;
+  setMarkingEnabled(false);
 
   if(stars>0){
     state.combo++;
@@ -823,12 +875,13 @@ function applyResult(pct, heard, entry){
     state.score += pct + state.combo*5;
     const dmg = Math.round((stars===3?26:stars===2?18:11) + state.combo*1.5);
     heroAnim.cast = 1;
-    setStatus(stars===3? '⭐⭐⭐ Perfect — '+pct+'%'
+    setStatus(manual ? '✓ Marked good — nice one.'
+            : stars===3? '⭐⭐⭐ Perfect — '+pct+'%'
             : stars===2? '⭐⭐ Good — '+pct+'%. '+entry.rule.tip
             : '⭐ Close — '+pct+'%. '+entry.rule.tip);
     sfx('hit');
     setTimeout(()=>{
-      projectiles.push(makeProj(heroPos(), bossPos(), '#7cf5c4', ()=>{
+      queueProj(heroPos(), bossPos(), '#7cf5c4', ()=>{
         state.bossHP = Math.max(0, state.bossHP-dmg);
         bossAnim.hit=1; shake=9;
         burst(bossPos().x,bossPos().y,'#7cf5c4',26);
@@ -836,21 +889,23 @@ function applyResult(pct, heard, entry){
         popup(bossPos().x,bossPos().y-46,'-'+dmg,'#7cf5c4',22);
         if(state.combo>1) popup(bossPos().x,bossPos().y-70,'COMBO x'+state.combo,'#ffd166',17);
         advance();
-      }));
+      });
     },170);
   }else{
     state.combo = 0;
     bossAnim.lunge = 1;
-    setStatus('❌ '+pct+'% — heard "<b>'+ (heard||'…') +'</b>". '+(why||entry.rule.tip));
+    setStatus(manual
+      ? '✗ Marked needs work. '+entry.rule.tip
+      : '❌ '+pct+'% — heard "<b>'+ (heard||'…') +'</b>". '+(why||entry.rule.tip));
     sfx('miss');
     setTimeout(()=>{
-      projectiles.push(makeProj(bossPos(), heroPos(), '#ff5d73', ()=>{
+      queueProj(bossPos(), heroPos(), '#ff5d73', ()=>{
         state.heroHP = Math.max(0, state.heroHP-14);
         heroAnim.hit=1; shake=11;
         burst(heroPos().x,heroPos().y,'#ff5d73',24);
         popup(heroPos().x,heroPos().y-46,'-14','#ff5d73',20);
         advance();
-      }));
+      });
     },170);
   }
 }
@@ -873,6 +928,8 @@ function advance(){
   }
   document.getElementById('playbackBtn').disabled = true;
   lastBlob = null;
+  setMarkingEnabled(true);
+  setStatus('Say <b>'+current().word+'</b> — then mark it.');
 }
 
 /* reference pronunciation + self playback */
@@ -968,7 +1025,7 @@ function reportToTrainer(won, avg){
       source:'antoch-game', game:'pronunciation',
       won:!!won, average:avg, score:state.score, bestCombo:state.bestCombo,
       results: state.results.map(r=>({word:r.word, pct:r.pct, stars:r.stars,
-        attempts:r.attempts, heard:r.heard||'', isVocab:!!r.isVocab}))
+        attempts:r.attempts, heard:r.heard||'', isVocab:!!r.isVocab, manual:!!r.manual}))
     }, '*');
   }catch(e){}
 }
@@ -978,6 +1035,26 @@ function reportToTrainer(won, avg){
    ============================================================ */
 function makeProj(from,to,color,onArrive){
   return {x:from.x,y:from.y,fx:from.x,fy:from.y,tx:to.x,ty:to.y,t:0,color,onArrive,spin:0};
+}
+
+/* Fire a projectile whose effect is guaranteed to land.
+   The animation advances on requestAnimationFrame, which the browser
+   stops entirely while the tab is hidden — and during a screen-shared
+   lesson the trainer alt-tabs constantly. Without a wall-clock
+   fallback the round would sit frozen mid-attempt, marking disabled,
+   until somebody noticed. Timers keep running when frames do not. */
+function queueProj(from,to,color,onArrive,timeoutMs){
+  let fired = false;
+  const fire = ()=>{ if(fired) return; fired = true; onArrive(); };
+  const p = makeProj(from,to,color,fire);
+  projectiles.push(p);
+  setTimeout(()=>{
+    if(fired) return;
+    const i = projectiles.indexOf(p);
+    if(i>=0) projectiles.splice(i,1);
+    fire();
+  }, timeoutMs || 1500);
+  return p;
 }
 function burst(x,y,color,n){
   for(let i=0;i<n;i++){
