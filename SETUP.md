@@ -1,125 +1,161 @@
 # Setting up Antoch Session Trainer
 
-There are two ways to run this. Start with local mode today, move to cloud mode when
-you want trainees logging in from their own devices.
+**This copy is already configured.** `js/config.js` holds a live Supabase project and an
+Unsplash key, the database schema has been applied, and an administrator account exists.
+If you are just running the app, skip to [Running it](#running-it).
+
+The rest of this file is the full procedure — useful if you ever move to a new Supabase
+project, hand the app to someone else, or need to understand what is wired to what.
 
 ---
 
-## 1. Local mode — nothing to configure
+## The two modes
 
-Open the app from any web server (see *Running it* below) and sign in with:
+**Local mode** — `SUPABASE_URL` empty in `js/config.js`. Everything is stored in one
+browser. Costs nothing, works offline, but trainees cannot log in from their own devices
+and clearing site data deletes everything. Useful for trying things out.
 
-- **Email:** `admin@antoch.local`
-- **Password:** `antoch`
+**Cloud mode** — Supabase URL and anon key filled in. Real logins, real access rules, data
+reachable from any device. This is what the app is running now.
 
-Change that password immediately under **Settings**.
-
-Everything lives in that one browser's storage. That means:
-
-- it works offline and costs nothing
-- clearing site data deletes every trainee and session, so use **Settings → Backup → Export JSON** regularly
-- trainees cannot log in from their own laptops — only the trainer's browser has the data
+The sign-in screen tells you which one you are in. It shows either *"Connected to
+Supabase."* or *"Running in local mode."*
 
 ---
 
-## 2. Cloud mode — Supabase
+## Creating a Supabase project from scratch
 
-Supabase gives you a hosted database, real logins and a free tier that comfortably covers
-a solo teacher. There is no server to maintain.
+1. <https://supabase.com> → **Start your project** → sign in with GitHub.
+2. **New project**. Give it a name, generate a database password and save it somewhere,
+   pick the nearest region. Wait for provisioning.
+3. **SQL Editor → New query**. Paste the whole of `supabase-schema.sql` and press **Run**.
+   Expect *Success. No rows returned*.
+4. **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
+   Newer dashboards label these under **API Keys** with the anon key called
+   **publishable** (`sb_publishable_...`). Either form works.
+5. Paste both into `js/config.js`.
 
-### Step by step
+**Never put the `service_role` / secret key in this file.** It bypasses every access rule
+in the schema, and this file ends up in a public repository.
 
-1. Go to <https://supabase.com>, sign up, and click **New project**.
-   Pick any name and a strong database password. Wait for it to finish provisioning.
-2. In the left sidebar open **SQL Editor → New query**.
-3. Open `supabase-schema.sql` from this folder, copy the whole file, paste it in, press **Run**.
-   You should see *Success. No rows returned*.
-4. In the sidebar open **Project Settings → API**. Copy two values:
-   - **Project URL**
-   - **anon public** key (the long one labelled `anon`, *not* `service_role`)
-5. Open `js/config.js` in this folder and paste them in:
+### Turn off email confirmation
 
-   ```js
-   export const SUPABASE_URL = 'https://xxxxxxxx.supabase.co';
-   export const SUPABASE_ANON_KEY = 'eyJhbGciOi...';
-   ```
+**Authentication → Sign In / Providers → Email → Confirm email → off → Save.**
 
-6. Still in Supabase, open **Authentication → Providers → Email** and turn
-   **Confirm email** off while you are setting up. Leaving it on is fine too — accounts
-   just have to click a link before their first sign-in.
+Do this before onboarding anyone. With confirmation on, signup returns no session, the
+join code cannot be applied, and the new user is stranded as an unlinked trainee. They can
+recover via *Settings → Redeem a code*, but it is a confusing first experience for someone
+you just handed a six-character code to.
 
-### Creating your own administrator account
+---
 
-1. Open the app, choose **Create account**, and register with any email and password.
-   Leave the code field blank — it will refuse you, which is expected.
-2. To get past that, first create one invite code by hand. In the Supabase **SQL Editor**:
+## The first administrator
+
+A chicken-and-egg problem: only an administrator can issue invite codes, and there is no
+administrator yet. So the very first code is inserted by hand.
+
+1. **SQL Editor**, once:
 
    ```sql
-   insert into invites (code, role) values ('START1', 'admin');
+   insert into invites (code, role) values ('ANTOCHADMIN', 'admin');
    ```
 
-3. Register again using the code `START1`. You are now the administrator.
+   Use a code with no ambiguous characters. `START1` looks fine until you realise the last
+   character could be a digit one, a capital i or a lowercase L depending on the font.
 
-From then on you never touch SQL again: generate trainer and administrator codes from the
-**People & access** screen inside the app.
+2. In the app, **Create account**, using that code. Case does not matter.
 
-### How the three roles get their logins
+3. If you see *"Account created, but email confirmation is switched on…"*, then confirm via
+   the emailed link, sign in, and go to **Settings → Redeem a code**. If the email never
+   arrives, Supabase's built-in mailer is rate-limited — confirm manually instead:
 
-- **Administrator** — invite code generated in *People & access*.
-- **Trainer** — invite code generated in *People & access*, given to them once.
-- **Trainee** — the six-character **join code** on their trainee card. They open the app,
-  choose *Create account*, and type that code. It links their new login to their existing
-  record and stops working afterwards.
+   ```sql
+   update auth.users set email_confirmed_at = now() where email_confirmed_at is null;
+   ```
 
-The database enforces the same boundaries the interface shows: a trainer's queries cannot
-return another trainer's trainees, and a trainee's queries cannot return anyone else's
-sessions. That check happens on Supabase's side, so it holds even if someone opens the
-browser console.
+4. **Delete any unused admin invite codes** from *People & access* as soon as you are in.
+   An unused admin code plus the anon key — which is public — is a working administrator
+   account for anyone who has both.
+
+After this you never touch SQL again. Trainer and administrator codes are generated from
+*People & access*; trainee codes appear on each trainee's card.
 
 ---
 
-## 3. Optional — quirky pictures
+## How each role gets a login
 
-The Picture Description drill works out of the box using a neutral random photo source.
-For the odd, unexpected images the drill is actually designed around, add a free
-Unsplash key:
+- **Administrator** — invite code from *People & access*.
+- **Trainer** — invite code from *People & access*, handed over once.
+- **Trainee** — the six-character **join code** on their trainee card. They choose
+  *Create account* and enter it. It links their new login to their existing record and
+  stops working afterwards.
 
-1. Register an application at <https://unsplash.com/developers>.
-2. Copy the **Access Key**.
-3. Paste it into `js/config.js`:
+Codes are single use. The database enforces this, not the interface.
 
-   ```js
-   export const UNSPLASH_ACCESS_KEY = 'your-access-key';
-   ```
+### What the database enforces
 
-The key is visible to anyone who views the page source. That is normal for Unsplash's
-client-side use, and the free tier is rate-limited rather than billed — but do not reuse a
-key you use elsewhere for anything sensitive.
+Verified against the live project, not just intended:
+
+- signed-out visitors read nothing from `profiles`, `trainees`, `topics`, `sessions` or `invites`
+- a signed-out visitor cannot insert their own invite code
+- `claim_code` refuses when not signed in
+- new accounts are always created as a plain trainee; the real role is granted server-side
+  by `claim_code`, so signup metadata cannot be edited to award administrator rights
+
+---
+
+## Pictures
+
+The Picture Description drill uses Unsplash. A key is already configured. To replace it:
+
+1. Register an application at <https://unsplash.com/developers>, tick every box on the
+   terms page. The application name cannot contain the word "Unsplash".
+2. Copy the **Access Key** — not the Secret key.
+3. Paste it into `UNSPLASH_ACCESS_KEY` in `js/config.js`.
+
+Free tier is 50 requests per hour; a session uses about three.
+
+The drill searches rather than pulling "random", and takes a random page between 1 and 6.
+The top hits for any search term are polished stock photography, which is precisely what a
+description drill does not want. The query list is deliberately concrete — `mannequin`,
+`parade float`, `laundromat` — because abstract words like "surreal" return landscapes.
+
+Without a key the drill still runs on a neutral random source. If Unsplash is rate-limited
+or returns nothing, there is a box under the image for pasting any image address by hand.
 
 ---
 
 ## Running it
 
-The app uses JavaScript modules, so it must be served over `http://` or `https://` —
-opening `index.html` directly from the file system will not work.
+The app uses JavaScript modules, so it must be served over `http://` or `https://`.
+Double-clicking `index.html` will not work.
 
-**On your own machine**, from inside the `antoch-session-trainer` folder:
+Locally, from inside this folder:
 
 ```bash
-python -m http.server 5173
+npx serve -l 5173 .
 ```
 
 Then open <http://localhost:5173>.
 
-**On GitHub Pages**, which is where this is meant to live:
+### GitHub Pages
 
-1. Create a repository and push the contents of this folder to it.
-2. Repository **Settings → Pages → Build and deployment → Deploy from a branch**,
-   branch `main`, folder `/ (root)`.
-3. Your app appears at `https://<your-account>.github.io/<repo>/` within a minute or two.
+1. Create an **empty public** repository — no README, no .gitignore, no licence.
+2. From this folder:
 
-Microphone access in the pronunciation game requires a secure origin. `localhost` and
-GitHub Pages both qualify; a plain `http://` address on your local network does not.
+   ```bash
+   git remote add origin https://github.com/<account>/<repo>.git && git push -u origin main
+   ```
+
+3. Repo **Settings → Pages → Deploy from a branch**, branch `main`, folder `/ (root)`.
+4. Set **Site URL** in Supabase under **Authentication → URL Configuration** to the
+   published address, so confirmation and password-reset links point to the right place.
+
+Pages requires a **public** repository on a free GitHub account. Publishing from a private
+repository needs a paid plan.
+
+The microphone in the pronunciation game needs a secure origin. `localhost` and GitHub
+Pages both qualify; a plain `http://` address on your local network does not.
 
 ---
 
@@ -127,10 +163,13 @@ GitHub Pages both qualify; a plain `http://` address on your local network does 
 
 - **Nothing auto-advances.** The timer counts up and changes colour past the suggested
   length; you move the session on with **Next stage**.
-- **Everything is saved as you type**, at every stage change. Closing the tab mid-session
-  loses nothing — reopen the session from the trainee's page.
-- **Stage 3 uses whatever Stage 2 harvested.** If you harvested nothing, it falls back to a
-  word list matched to the trainee's CEFR level and tells you it has done so.
+- **Everything saves as you type**, and at every stage change. Closing the tab loses
+  nothing — the trainee's page shows the session with a **Resume** button, and it reopens
+  at the stage you left.
+- **Stage 3 uses whatever Stage 2 harvested.** If nothing was harvested it falls back to a
+  word list matched to the trainee's level and says so on screen.
 - **Right-click a filler counter** to subtract a mistaken tap.
-- The feedback note is built only from what you actually recorded. Empty sections are left
-  out rather than padded.
+- The feedback note is built only from what you actually recorded. Empty sections are
+  omitted rather than padded.
+- The sign-in screen shows a build number. If your browser is serving a cached older copy,
+  a red banner says so instead of leaving you to guess.

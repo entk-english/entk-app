@@ -55,10 +55,33 @@ forgetting is a moral duty") are not the same prompt at different speeds.
 
 ## Storage
 
-Works with no configuration at all, storing everything in the browser. Point it at a free
-Supabase project when you want trainees signing in from their own devices; the same access
-rules are then enforced by the database rather than only by the interface. See
-[SETUP.md](SETUP.md).
+Two backends behind one API. With no configuration it stores everything in the browser;
+with a Supabase URL and anon key in `js/config.js` it moves to hosted Postgres with real
+logins, and the access rules above are then enforced by the database rather than only by
+the interface.
+
+This copy is configured for cloud mode. Signed-out visitors can read nothing from any
+table, new accounts are always created as a plain trainee, and roles are granted
+server-side by a `security definer` function — so signup metadata cannot be edited to
+award administrator rights. See [SETUP.md](SETUP.md).
+
+## Deploying
+
+Static files, so GitHub Pages serves it as-is:
+
+```bash
+git remote add origin https://github.com/<account>/<repo>.git && git push -u origin main
+```
+
+Then **Settings → Pages → Deploy from a branch → main → / (root)**, and set the published
+address as **Site URL** in Supabase under *Authentication → URL Configuration*.
+
+The repository must be **public** for Pages on a free GitHub account. That is safe here:
+the anon key is designed to be published, and the data is protected by the database rules,
+not by hiding the key. Never commit the `service_role` key.
+
+The microphone in the pronunciation game needs a secure origin — `localhost` and GitHub
+Pages qualify, a plain `http://` LAN address does not.
 
 ## Layout
 
