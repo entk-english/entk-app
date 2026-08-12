@@ -109,7 +109,14 @@ function paintSummary(){
 }
 
 /* ---- 1. environment ---- */
-put('env','browser', navigator.userAgent.replace(/^Mozilla\/5\.0 /,'').slice(0,90));
+/* Full string, untruncated: the tail is where Edg/ OPR/ Brave and other
+   Chromium rebrands identify themselves, and that distinction decides
+   whether Google's speech backend will answer this browser at all. */
+put('env','user agent (full)', navigator.userAgent);
+if (navigator.userAgentData && navigator.userAgentData.brands){
+  put('env','brands', navigator.userAgentData.brands.map(b=>b.brand+' '+b.version).join(', '));
+}
+put('env','vendor', navigator.vendor || '(none)');
 put('env','page address', location.origin);
 put('env','secure context', window.isSecureContext ? 'yes' : 'NO — speech will not work',
     window.isSecureContext ? 'ok' : 'bad');
@@ -178,26 +185,50 @@ function startMeter(){
 }
 
 /* ---- 4. speech recognition here ---- */
+/* The full event sequence, timestamped. This is the decisive test.
+   audiostart means the audio pipeline opened. soundstart/speechstart
+   mean Chrome itself detected speech in that audio. If those fire and
+   no result follows, the audio left the machine and nothing came back.
+   If they never fire, Chrome never listened in the first place — a
+   completely different fault with a completely different fix. */
 document.getElementById('sr').onclick = () => {
   const rec = new SR();
   rec.lang = 'en-US';
   rec.maxAlternatives = 5;
-  let got = false;
+  rec.interimResults = true;      // partials prove the stream is alive
+  rec.continuous = false;
+
   const t0 = Date.now();
-  document.getElementById('sr').disabled = true;
-  document.getElementById('sr').textContent = 'Listening… say "water"';
+  const trace = [];
+  let got = false;
+  const mark = name => trace.push(name + '@' + (Date.now()-t0) + 'ms');
+
+  ['audiostart','soundstart','speechstart','speechend','soundend','audioend','start','nomatch']
+    .forEach(ev => rec.addEventListener(ev, () => mark(ev)));
+
+  const btn = document.getElementById('sr');
+  btn.disabled = true;
+  btn.textContent = 'Listening… say "water"';
+
   rec.onresult = e => {
     got = true;
+    mark('result' + (e.results[0].isFinal ? '(final)' : '(interim)'));
     const alts = [];
     for (let i=0;i<e.results[0].length;i++) alts.push(e.results[0][i].transcript);
     put('srOut','recognition on page','HEARD: "'+alts.join('" / "')+'"','ok');
   };
-  rec.onerror = e => put('srOut','recognition on page','FAILED — error: '+e.error,'bad');
+  rec.onerror = e => { mark('error:'+e.error);
+    put('srOut','recognition on page','FAILED — error: '+e.error,'bad'); };
   rec.onend = () => {
-    document.getElementById('sr').disabled = false;
-    document.getElementById('sr').textContent = 'Start listening';
-    if (!got) put('srOut','recognition ended','no result after '+((Date.now()-t0)/1000).toFixed(1)+'s','warn');
+    mark('end');
+    btn.disabled = false;
+    btn.textContent = 'Start listening';
+    if (!got) put('srOut','recognition on page',
+      'no result after '+((Date.now()-t0)/1000).toFixed(1)+'s','bad');
+    put('srOut','event trace', trace.join(' → ') || '(no events fired at all)',
+        /speechstart/.test(trace.join(' ')) ? 'warn' : 'bad');
   };
+
   try{ rec.start(); }
   catch(e){ put('srOut','recognition on page','could not start — '+e.message,'bad'); }
 };
@@ -249,7 +280,8 @@ async function reach(label, url){
 document.getElementById('net').onclick = async () => {
   document.getElementById('net').disabled = true;
   await reach('google.com reachable', 'https://www.google.com/generate_204');
-  await reach('speech endpoint reachable', 'https://www.google.com/speech-api/v2/recognize');
+  await reach('speech.googleapis.com reachable', 'https://speech.googleapis.com/');
+  await reach('legacy speech-api reachable', 'https://www.google.com/speech-api/v2/recognize');
   await reach('supabase reachable', 'https://duemwskakpalvgmdfsfu.supabase.co/rest/v1/');
   document.getElementById('net').disabled = false;
 };
