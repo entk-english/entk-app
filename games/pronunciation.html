@@ -163,7 +163,8 @@
     <div id="statusLine">Click the mic and say the word out loud</div>
     <div id="micHelp">
       <label><input type="checkbox" id="recToggle" checked> Record my voice for playback</label>
-      <span id="micHint">Not hearing you? Untick this — on some machines the recorder blocks the listener.</span>
+      <span id="speechMode"></span>
+      <button class="miniBtn" id="localBtn" style="display:none">⬇ Use offline speech</button>
     </div>
   </div>
 </div>
@@ -579,7 +580,18 @@ if(SR){
   };
   recognition.onend = ()=>{
     stopListening();
-    if(!gotResult) setStatus('Didn\'t catch that — tap the mic and try again.');
+    if(gotResult){ emptyRuns = 0; return; }
+    emptyRuns++;
+    /* Twice in a row with nothing at all, on the online recognizer,
+       is the network symptom rather than a quiet trainee. */
+    if(emptyRuns >= 2 && speechMode === 'cloud'){
+      const offer = document.getElementById('localBtn');
+      setStatus(offer && offer.style.display !== 'none'
+        ? 'Nothing is coming back from the online recogniser — tap <b>Use offline speech</b> below.'
+        : 'Nothing is coming back from the online recogniser. Your connection may be blocking it.');
+    }else{
+      setStatus('Didn\'t catch that — tap the mic and try again.');
+    }
   };
 }else{
   micBtn.disabled = true;
@@ -619,6 +631,7 @@ async function warmUpMic(){
   }catch(e){
     setStatus('🎤 Microphone blocked. Click the padlock in the address bar, allow the microphone, then reload.');
   }
+  setupLocalSpeech();
 }
 
 function releaseMic(s){
@@ -626,6 +639,87 @@ function releaseMic(s){
   if(target){ try{ target.getTracks().forEach(t=>t.stop()); }catch(e){} }
   if(!s) micStream = null;
 }
+
+/* ------------------------------------------------------------
+   OFFLINE SPEECH
+   By default Chrome streams the audio to Google and waits for the
+   text to come back. On a connection that cannot reach it, that
+   round trip simply never completes: recognition starts, hangs,
+   and ends with no result and no error. Chrome can also run the
+   recognizer on the machine itself, which removes the network from
+   the picture entirely — preferred here whenever it is available.
+   ------------------------------------------------------------ */
+let speechMode = 'cloud';
+let emptyRuns = 0;
+
+function setSpeechLabel(text, good){
+  const el = document.getElementById('speechMode');
+  if(!el) return;
+  el.textContent = text;
+  el.style.color = good ? 'var(--accent)' : 'var(--muted)';
+}
+
+/* Never let a capability probe hold the game up: if it has not
+   answered in a few seconds, carry on with the online recognizer. */
+function withTimeout(promise, ms, fallback){
+  return Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(()=>resolve(fallback), ms))
+  ]);
+}
+
+/* Deliberately never probed automatically. Chrome's on-device
+   availability check can block the renderer while it answers, and a
+   game that freezes at the start of a round is worse than one that
+   needs a working connection. So the trainer asks for it, once, and
+   only then does anything run. */
+function setupLocalSpeech(){
+  const b = document.getElementById('localBtn');
+  if(!recognition || !SR || typeof SR.available !== 'function'){
+    setSpeechLabel('online speech', false);
+    if(b) b.style.display = 'none';
+    return;
+  }
+  setSpeechLabel('online speech', false);
+  if(b) b.style.display = '';
+}
+
+(function wireLocalBtn(){
+  const b = document.getElementById('localBtn');
+  if(!b) return;
+  b.onclick = async ()=>{
+    b.disabled = true; b.textContent = 'Checking…';
+    setStatus('Setting up offline speech — this can take a moment the first time.');
+    try{
+      let state = await withTimeout(
+        SR.available({ langs:['en-US'], processLocally:true }), 8000, 'timeout');
+
+      if(state === 'downloadable' || state === 'downloading'){
+        b.textContent = 'Downloading…';
+        const ok = await withTimeout(
+          SR.install({ langs:['en-US'], processLocally:true }), 120000, false);
+        state = ok ? 'available' : 'unavailable';
+      }
+
+      if(state === 'available'){
+        recognition.processLocally = true;
+        speechMode = 'on-device';
+        setSpeechLabel('offline speech ✓', true);
+        b.style.display = 'none';
+        setStatus('Offline speech ready — tap the mic and say <b>'+current().word+'</b>.');
+        return;
+      }
+
+      b.disabled = false; b.textContent = '⬇ Use offline speech';
+      setStatus(state === 'timeout'
+        ? 'Offline speech did not answer in time. Staying on the online recogniser.'
+        : 'Offline speech is not available for English on this machine.');
+    }catch(e){
+      b.disabled = false; b.textContent = '⬇ Use offline speech';
+      setStatus('Could not switch to offline speech — '+e.message);
+    }
+  };
+})();
 
 micBtn.onclick = async ()=>{
   if(!recognition || listening || state.busy || !state.running) return;

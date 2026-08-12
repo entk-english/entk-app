@@ -69,6 +69,22 @@
 </div>
 
 <div class="card">
+  <h2>6. Network, and on-device recognition</h2>
+  <p class="sub" style="margin:0 0 8px">Chrome normally sends your audio to Google and waits for text back.
+  If that route is blocked, recognition hangs and returns nothing. Chrome can also run it entirely on your
+  own machine — this checks whether that is possible here.<br>
+  <b style="color:var(--warn)">Heads up:</b> “Check on-device” can freeze the page for a few seconds while
+  Chrome answers, and “Download language pack” may take a minute or two. Both are normal. Wait it out.</p>
+  <div class="row">
+    <button id="net">Test network route</button>
+    <button id="localAvail">Check on-device</button>
+    <button id="localInstall" disabled>Download language pack</button>
+    <button id="localTry" disabled>Listen on-device</button>
+  </div>
+  <div id="netOut"></div>
+</div>
+
+<div class="card">
   <h2>Summary — copy this back</h2>
   <div id="summary">Run the sections above.</div>
   <div class="row" style="margin-top:12px"><button id="copy">Copy summary</button></div>
@@ -215,6 +231,80 @@ window.addEventListener('message', e => {
   if (e.data && e.data.t === 'frame')
     put('frameOut','recognition in frame', e.data.v, /HEARD/.test(e.data.v) ? 'ok' : 'bad');
 });
+
+/* ---- 6. network route and on-device recognition ---- */
+
+/* An opaque no-cors request still throws when the host is unreachable,
+   which is all we need to tell "blocked" from "slow". */
+async function reach(label, url){
+  const t0 = Date.now();
+  try{
+    await fetch(url, {mode:'no-cors', cache:'no-store'});
+    put('netOut', label, 'reachable in '+(Date.now()-t0)+'ms', 'ok');
+  }catch(e){
+    put('netOut', label, 'BLOCKED — '+e.message+' after '+(Date.now()-t0)+'ms', 'bad');
+  }
+}
+
+document.getElementById('net').onclick = async () => {
+  document.getElementById('net').disabled = true;
+  await reach('google.com reachable', 'https://www.google.com/generate_204');
+  await reach('speech endpoint reachable', 'https://www.google.com/speech-api/v2/recognize');
+  await reach('supabase reachable', 'https://duemwskakpalvgmdfsfu.supabase.co/rest/v1/');
+  document.getElementById('net').disabled = false;
+};
+
+document.getElementById('localAvail').onclick = async () => {
+  if (!SR || typeof SR.available !== 'function'){
+    put('netOut','on-device support','this Chrome build does not expose it','bad');
+    return;
+  }
+  try{
+    const state = await SR.available({ langs:['en-US'], processLocally:true });
+    put('netOut','on-device status', state,
+        state==='available' ? 'ok' : state==='unavailable' ? 'bad' : 'warn');
+    document.getElementById('localInstall').disabled = (state !== 'downloadable');
+    document.getElementById('localTry').disabled = (state !== 'available');
+  }catch(e){
+    put('netOut','on-device status','check failed — '+e.message,'bad');
+  }
+};
+
+document.getElementById('localInstall').onclick = async () => {
+  const b = document.getElementById('localInstall');
+  b.disabled = true; b.textContent = 'Downloading…';
+  try{
+    const ok = await SR.install({ langs:['en-US'], processLocally:true });
+    put('netOut','language pack installed', ok ? 'yes' : 'no', ok ? 'ok' : 'bad');
+    document.getElementById('localTry').disabled = !ok;
+  }catch(e){
+    put('netOut','language pack installed','failed — '+e.message,'bad');
+  }
+  b.textContent = 'Download language pack';
+};
+
+document.getElementById('localTry').onclick = () => {
+  const rec = new SR();
+  rec.lang = 'en-US';
+  rec.processLocally = true;
+  rec.maxAlternatives = 5;
+  let got = false;
+  const t0 = Date.now();
+  const b = document.getElementById('localTry');
+  b.disabled = true; b.textContent = 'Listening… say "water"';
+  rec.onresult = e => {
+    got = true;
+    put('netOut','on-device recognition','HEARD: "'+e.results[0][0].transcript+'"','ok');
+  };
+  rec.onerror = e => put('netOut','on-device recognition','FAILED — error: '+e.error,'bad');
+  rec.onend = () => {
+    b.disabled = false; b.textContent = 'Listen on-device';
+    if (!got) put('netOut','on-device recognition',
+      'no result after '+((Date.now()-t0)/1000).toFixed(1)+'s','bad');
+  };
+  try{ rec.start(); }
+  catch(e){ put('netOut','on-device recognition','could not start — '+e.message,'bad'); }
+};
 
 /* ---- copy ---- */
 document.getElementById('copy').onclick = () => {
