@@ -25,8 +25,7 @@ export const LEVEL_LABEL = {
 export const WARMUP_FORMATS = [
   { id: 'rapid', name: 'Rapid personal questions', hint: 'Fire them fast. Short answers only — do not correct anything.' },
   { id: 'thisOrThat', name: 'This or that', hint: 'Trainee picks one and says why in a few words.' },
-  { id: 'chain', name: 'One-word story chain', hint: 'You add one word, then the trainee adds one word. Keep going until the sentence collapses.' },
-  { id: 'emoji', name: 'Emoji to sentence', hint: 'Trainee turns the emoji into one spoken sentence.' }
+  { id: 'chain', name: 'One-word story chain', hint: 'You add one word, then the trainee adds one word. Keep going until the sentence collapses.' }
 ];
 
 export const WARMUPS = {
@@ -54,14 +53,6 @@ export const WARMUPS = {
     C1: ['Precisely because', 'What struck me', 'Had it not', 'In hindsight', 'For reasons nobody', 'Whatever else'],
     C2: ['Notwithstanding', 'That it should ever', 'Whether by design', 'Only in retrospect', 'Improbable as it', 'Insofar as']
   },
-  emoji: {
-    A1: ['🐶🏃‍♂️🌳', '☕🌅😊', '🚌🏫📚', '🍕🍕😋', '🌧️☔🏠', '👨‍👩‍👧🎂🎉'],
-    A2: ['✈️🧳😴', '📱🔋❌😱', '🍳🔥🚒', '🎬🍿👫', '🚗⛽💸', '🐱🪟🌙'],
-    B1: ['⏰😵💼🏃', '🎁🤔😐', '🌍📸🗺️', '💡🧠✨', '🏥📋😬', '🎓👨‍🎓📉'],
-    B2: ['📉💼🤝😤', '🤖👨‍💼❓', '🌱🏭⚖️', '🗳️📰🤯', '💍💔📜', '🧗‍♀️🪢😰'],
-    C1: ['🪞🧩🕰️', '⚖️🤐💭', '🎭👥🫥', '📈🫧💥', '🧬🔬⚖️', '🕯️📖🌫️'],
-    C2: ['♟️🫱🔥🕊️', '🏛️🪶⛓️', '🧠🪞🌀', '📜🔥🗝️', '⏳🪞🫀', '🧭🌫️⚓']
-  }
 };
 
 /* -------------------------------------------------------------

@@ -127,11 +127,11 @@ function draw() {
 
   const themeBtn = $('[data-theme-toggle]', bar);
   const paintThemeBtn = () => {
-    themeBtn.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? '☾' : '☀';
+    themeBtn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀' : '☾';
   };
   paintThemeBtn();
   themeBtn.onclick = () => {
-    const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     try { localStorage.setItem('ast:theme', next); } catch (e) {}
     paintThemeBtn();
@@ -254,9 +254,7 @@ function stageWarmup(body) {
     S.data.warmup = { id: format, format: def.name };
 
     let promptHTML;
-    if (format === 'emoji') {
-      promptHTML = '<div class="emoji">' + esc(pickOne(bank)) + '</div>';
-    } else if (format === 'chain') {
+    if (format === 'chain') {
       promptHTML = 'Start the chain with: <b style="color:var(--accent)">' + esc(pickOne(bank)) + '</b>';
     } else {
       promptHTML = esc(pickOne(bank));

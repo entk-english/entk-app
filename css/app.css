@@ -7,7 +7,41 @@
    palette swap rather than a pile of overrides.
    ============================================================= */
 
+/* Light is the default — this is a tool used in daylight on a shared
+   screen, so it should not start by turning the room black. The
+   palette is deliberately cool: slate and steel rather than the
+   lavender the dark theme is built from, and never flat white. */
 :root {
+  --bg: #eaeef4;
+  --bg-grad: radial-gradient(ellipse 80% 60% at 50% 0%, #dce6f2, transparent 70%),
+             radial-gradient(ellipse 60% 50% at 85% 100%, #d9e6ea, transparent 70%),
+             linear-gradient(180deg, #f4f7fb, #e4eaf2);
+  --panel: rgba(255, 255, 255, 0.88);
+  --sunken: #f7f9fc;
+  --sunken-soft: #eef2f8;
+  --line: #c3cfdd;
+  --line-soft: #dae2ec;
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --accent-deep: #0b574f;
+  --accent-wash: rgba(15, 118, 110, 0.10);
+  --accent-edge: rgba(15, 118, 110, 0.32);
+  --gold: #8a5a00;
+  --gold-ink: #ffffff;
+  --gold-wash: rgba(138, 90, 0, 0.09);
+  --gold-edge: rgba(138, 90, 0, 0.28);
+  --danger: #b3243c;
+  --danger-wash: rgba(179, 36, 60, 0.08);
+  --danger-edge: rgba(179, 36, 60, 0.3);
+  --text: #0f1c2e;
+  --muted: #4d5d73;
+  --shadow: 0 10px 28px rgba(30, 55, 90, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --blur: none;
+  --radius: 14px;
+  --radius-lg: 20px;
+}
+
+html[data-theme="dark"] {
   --bg: #080418;
   --bg-grad: radial-gradient(ellipse 80% 60% at 50% 0%, #2a1a5c, transparent 70%),
              radial-gradient(ellipse 60% 50% at 85% 100%, #1d2a5e, transparent 70%),
@@ -33,36 +67,6 @@
   --muted: #a996d6;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.07);
   --blur: blur(14px);
-  --radius: 14px;
-  --radius-lg: 20px;
-}
-
-html[data-theme="light"] {
-  --bg: #f4f2fa;
-  --bg-grad: radial-gradient(ellipse 80% 60% at 50% 0%, #e9e4fb, transparent 70%),
-             radial-gradient(ellipse 60% 50% at 85% 100%, #e2ecfb, transparent 70%),
-             linear-gradient(180deg, #fbfaff, #eeebf7);
-  --panel: rgba(255, 255, 255, 0.86);
-  --sunken: #ffffff;
-  --sunken-soft: #faf9fd;
-  --line: #d5cdea;
-  --line-soft: #e6e1f2;
-  --accent: #12805a;
-  --accent-ink: #ffffff;
-  --accent-deep: #0c5f43;
-  --accent-wash: rgba(18, 128, 90, 0.10);
-  --accent-edge: rgba(18, 128, 90, 0.30);
-  --gold: #8a6100;
-  --gold-ink: #ffffff;
-  --gold-wash: rgba(138, 97, 0, 0.09);
-  --gold-edge: rgba(138, 97, 0, 0.28);
-  --danger: #c22a41;
-  --danger-wash: rgba(194, 42, 65, 0.08);
-  --danger-edge: rgba(194, 42, 65, 0.3);
-  --text: #1b1430;
-  --muted: #635a7d;
-  --shadow: 0 10px 30px rgba(60, 40, 110, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  --blur: none;
 }
 
 * { box-sizing: border-box; }
@@ -317,7 +321,6 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var
   display: flex; align-items: center; justify-content: center;
 }
 .prompt-box.small { font-size: 19px; font-weight: 500; padding: 18px 22px; min-height: 0; }
-.prompt-box .emoji { font-size: 54px; letter-spacing: 8px; }
 
 .counter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
 .counter {

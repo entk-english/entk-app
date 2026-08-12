@@ -58,8 +58,10 @@ function go(hash) { location.hash = hash; }
 
 /* ---------------- theme ---------------- */
 
+/* Light unless dark was explicitly chosen — the stylesheet's :root is
+   the light palette, so an absent attribute means light. */
 function currentTheme() {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
 }
 
 function toggleTheme() {
