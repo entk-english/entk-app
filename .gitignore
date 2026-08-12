@@ -1,0 +1,8 @@
+# local backups exported from Settings
+antoch-backup-*.json
+
+# editor and OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+node_modules/

@@ -1,0 +1,887 @@
+/* =============================================================
+   session.js — the live session runner.
+
+   The trainer advances every stage by hand. The timer is there to
+   be glanced at, never to interrupt: it counts up, turns amber at
+   the suggested length and red well past it, but nothing on screen
+   moves on its own.
+   ============================================================= */
+
+import { Store } from './store.js';
+import { UNSPLASH_ACCESS_KEY } from './config.js';
+import {
+  WARMUP_FORMATS, WARMUPS, TOPICS, PRON_FALLBACK, SENTENCE_SETS,
+  WORD_FORMS, EXPANSIONS, EXPANSION_STEPS, PICTURE_QUERIES, PICTURE_PROMPTS,
+  FILLERS, ERROR_TYPES, LEVEL_LABEL, forLevel, pickOne
+} from './content.js';
+import { esc, el, $, $$, toast, confirmBox, copyText, downloadText, fmtDate } from './ui.js';
+
+const DRILL_NAMES = {
+  sentence: 'Sentence Builder',
+  wordform: 'Word Form Drill',
+  expansion: 'Sentence Expansion',
+  picture: 'Picture Description'
+};
+
+let S = null;          // live session state
+let tick = null;       // timer interval
+
+export async function runSession(root, sessionId, backToApp) {
+  const sessions = await Store.listSessions();
+  const record = sessions.find(x => x.id === sessionId);
+  if (!record) { root.innerHTML = '<div class="page"><div class="notice err">Session not found.</div></div>'; return; }
+  const trainee = await Store.getTrainee(record.trainee_id);
+  const history = sessions.filter(s => s.trainee_id === record.trainee_id && s.id !== sessionId && s.ended_at);
+
+  const plan = record.plan || {};
+  const stages = ['warmup', 'harvest', 'pron', 'stage4']
+    .concat((plan.extras || []).filter(x => x !== plan.stage4))
+    .concat(['feedback']);
+
+  S = {
+    root, record, trainee, history, plan, stages, backToApp,
+    idx: 0,
+    startedAt: Date.now(),
+    stageStart: Date.now(),
+    data: Object.assign({
+      warmup: null,
+      harvest: { topic: plan.topic || '', words: [], errors: [], fillers: {}, seconds: 0 },
+      pron: null,
+      stage4: null,
+      extras: {},
+      feedback: { win: '', focus: '', text: '' }
+    }, record.data || {})
+  };
+
+  /* Reopening an unfinished session returns the trainer to the
+     stage they left, not back to the warm-up. */
+  S.idx = Math.min(Math.max(0, S.data.stage_index || 0), stages.length - 1);
+
+  /* Re-entering a session must not stack a second listener or leave
+     the previous stage clock running. */
+  cleanup();
+  window.addEventListener('message', onGameMessage);
+  draw();
+}
+
+const STAGE_META = {
+  warmup: { title: 'Warm-up', target: 150, blurb: 'Casual. Nothing is scored and nothing is corrected.' },
+  harvest: { title: 'Free Talk / Error Harvest', target: 270, blurb: 'Sixty seconds of unbroken speech, then you log what you heard.' },
+  pron: { title: 'Pronunciation Boxing', target: 600, blurb: 'The words harvested a minute ago are now the boss fight.' },
+  stage4: { title: 'Quick Round', target: 150, blurb: 'Short and sharp. Do not let this become a long drill.' },
+  wordform: { title: 'Word Form Drill', target: 180, blurb: 'Noun, infinitive, past, adjective.' },
+  expansion: { title: 'Sentence Expansion', target: 180, blurb: 'What, when, where, why — one at a time.' },
+  picture: { title: 'Picture Description', target: 120, blurb: '60 to 90 seconds of description, then follow-ups.' },
+  feedback: { title: 'Feedback Note', target: 90, blurb: 'Read it out, then send it to the trainee.' }
+};
+
+function meta(stage) {
+  if (stage === 'stage4') {
+    const kind = S.plan.stage4 || 'sentence';
+    return Object.assign({}, STAGE_META[kind === 'sentence' ? 'stage4' : kind], { title: DRILL_NAMES[kind] });
+  }
+  return STAGE_META[stage] || { title: stage, target: 120, blurb: '' };
+}
+
+/* ---------------- shell ---------------- */
+
+function draw() {
+  S.onLeave = null;
+  const stage = S.stages[S.idx];
+  const m = meta(stage);
+  const shell = el('<div class="session-shell"></div>');
+
+  const bar = el(
+    '<div class="stagebar">' +
+      '<div class="steps">' + S.stages.map((s, i) =>
+        '<span class="step ' + (i < S.idx ? 'done' : i === S.idx ? 'now' : '') + '">' +
+        (i + 1) + '. ' + esc(meta(s).title) + '</span>').join('') + '</div>' +
+      '<div><div class="timer" id="clock">00:00</div>' +
+        '<div class="timer-target">suggested ' + Math.round(m.target / 60) + ' min</div></div>' +
+      '<button class="btn ghost sm" data-back>Back</button>' +
+      '<button class="btn" data-next>' + (S.idx === S.stages.length - 1 ? 'Finish' : 'Next stage') + '</button>' +
+      '<button class="btn ghost sm" data-exit>Exit</button>' +
+    '</div>'
+  );
+  shell.appendChild(bar);
+
+  const page = el('<div class="page wide"></div>');
+  page.appendChild(el(
+    '<div class="stage-head"><div>' +
+      '<div class="eyebrow">' + esc(S.trainee.name) + ' · ' + esc(LEVEL_LABEL[S.trainee.level] || S.trainee.level) + '</div>' +
+      '<h1>' + esc(m.title) + '</h1>' +
+      '<p class="sub" style="margin:0">' + esc(m.blurb) + '</p>' +
+    '</div></div>'
+  ));
+  shell.appendChild(page);
+
+  S.root.innerHTML = '';
+  S.root.appendChild(shell);
+
+  $('[data-next]', bar).onclick = () => advance(1);
+  $('[data-back]', bar).onclick = () => advance(-1);
+  $('[data-exit]', bar).onclick = async () => {
+    if (await confirmBox('Leave this session?', 'Everything entered so far is already saved. You can reopen it from the trainee page.', false)) {
+      await persist();
+      cleanup();
+      location.hash = '#/trainee/' + S.trainee.id;
+      S.backToApp();
+    }
+  };
+
+  const stageBody = el('<div></div>');
+  page.appendChild(stageBody);
+  ({
+    warmup: stageWarmup,
+    harvest: stageHarvest,
+    pron: stagePron,
+    stage4: stageQuickRound,
+    wordform: stageWordForm,
+    expansion: stageExpansion,
+    picture: stagePicture,
+    feedback: stageFeedback
+  }[stage] || (b => b.appendChild(el('<div class="empty">Unknown stage.</div>'))))(stageBody);
+
+  startClock(m.target);
+}
+
+function startClock(target) {
+  clearInterval(tick);
+  S.stageStart = Date.now();
+  const node = $('#clock');
+  const paint = () => {
+    if (!document.body.contains(node)) { clearInterval(tick); return; }
+    const s = Math.floor((Date.now() - S.stageStart) / 1000);
+    node.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    node.className = 'timer' + (s > target * 1.5 ? ' warn' : s > target ? ' over' : '');
+  };
+  paint();
+  tick = setInterval(paint, 500);
+}
+
+async function advance(direction) {
+  const next = S.idx + direction;
+  if (next < 0) return;
+  if (S.onLeave) { try { S.onLeave(); } catch (e) { /* a stage hook must never block the session */ } S.onLeave = null; }
+  if (next >= S.stages.length) { await finish(); return; }
+  S.idx = next;
+  await persist();
+  draw();
+}
+
+async function persist() {
+  S.data.stage_index = S.idx;
+  try { await Store.updateSession(S.record.id, { data: S.data }); }
+  catch (e) { toast('Could not save: ' + e.message, 'err'); }
+}
+
+async function finish() {
+  S.data.feedback.text = buildNote();
+  await Store.updateSession(S.record.id, { data: S.data, ended_at: new Date().toISOString() });
+  cleanup();
+  toast('Session saved.');
+  location.hash = '#/trainee/' + S.trainee.id;
+  S.backToApp();
+}
+
+function cleanup() {
+  clearInterval(tick);
+  window.removeEventListener('message', onGameMessage);
+}
+
+/* =============================================================
+   STAGE 1 — WARM-UP
+   ============================================================= */
+
+function stageWarmup(body) {
+  const rotation = WARMUP_FORMATS[(S.plan.warmupIndex || 0) % WARMUP_FORMATS.length];
+  let format = (S.data.warmup && S.data.warmup.id) || rotation.id;
+  const level = S.trainee.level;
+
+  const card = el('<div class="card"></div>');
+  body.appendChild(card);
+
+  function drawFormat() {
+    const def = WARMUP_FORMATS.find(f => f.id === format);
+    const bank = forLevel(WARMUPS[format], level);
+    S.data.warmup = { id: format, format: def.name };
+
+    let promptHTML;
+    if (format === 'emoji') {
+      promptHTML = '<div class="emoji">' + esc(pickOne(bank)) + '</div>';
+    } else if (format === 'chain') {
+      promptHTML = 'Start the chain with: <b style="color:var(--accent)">' + esc(pickOne(bank)) + '</b>';
+    } else {
+      promptHTML = esc(pickOne(bank));
+    }
+
+    card.innerHTML =
+      '<div class="chips" style="margin-bottom:18px">' +
+        WARMUP_FORMATS.map(f => '<span class="chip' + (f.id === format ? ' on' : '') + '" data-f="' + f.id + '">' + esc(f.name) + '</span>').join('') +
+      '</div>' +
+      '<div class="prompt-box" id="wprompt">' + promptHTML + '</div>' +
+      '<p class="sub" style="margin:14px 0 0">' + esc(def.hint) + '</p>' +
+      '<div class="row" style="margin-top:14px"><button class="btn sm" data-again>Next prompt</button>' +
+      '<span class="badge">rotation suggests: ' + esc(rotation.name) + '</span></div>';
+
+    $$('[data-f]', card).forEach(c => c.onclick = () => { format = c.dataset.f; drawFormat(); });
+    $('[data-again]', card).onclick = drawFormat;
+  }
+
+  drawFormat();
+}
+
+/* =============================================================
+   STAGE 2 — FREE TALK / ERROR HARVEST
+   ============================================================= */
+
+function stageHarvest(body) {
+  const h = S.data.harvest;
+  const level = S.trainee.level;
+  const bank = forLevel(TOPICS, level);
+
+  const card = el(
+    '<div class="card">' +
+      '<div class="field"><label>Topic for the 60 seconds</label>' +
+        '<input id="h-topic" placeholder="Type any topic, or tap one below" value="' + esc(h.topic) + '"></div>' +
+      '<div class="eyebrow">Anchor — everyday</div><div class="chips" id="h-anchor" style="margin-bottom:12px"></div>' +
+      '<div class="eyebrow">Stretch — unusual, forces new language</div><div class="chips" id="h-stretch"></div>' +
+      '<div class="row" style="margin-top:20px;align-items:center">' +
+        '<button class="btn gold" id="h-start">Start 60 seconds</button>' +
+        '<div class="timer" id="h-clock" style="font-size:34px">01:00</div>' +
+        '<span class="sub" style="margin:0">Trainee talks without stopping. Do not interrupt.</span>' +
+      '</div>' +
+    '</div>'
+  );
+  body.appendChild(card);
+
+  (bank.anchor || []).forEach(t => {
+    const chip = el('<span class="chip">' + esc(t) + '</span>');
+    chip.onclick = () => { $('#h-topic', card).value = t; h.topic = t; };
+    $('#h-anchor', card).appendChild(chip);
+  });
+  (bank.stretch || []).forEach(t => {
+    const chip = el('<span class="chip gold">' + esc(t) + '</span>');
+    chip.onclick = () => { $('#h-topic', card).value = t; h.topic = t; };
+    $('#h-stretch', card).appendChild(chip);
+  });
+  $('#h-topic', card).addEventListener('input', e => { h.topic = e.target.value; });
+
+  /* 60 second speaking countdown, entirely separate from the stage clock */
+  let talkTimer = null;
+  $('#h-start', card).onclick = () => {
+    clearInterval(talkTimer);
+    const clock = $('#h-clock', card);
+    let left = 60;
+    const paint = () => {
+      clock.textContent = '00:' + String(Math.max(0, left)).padStart(2, '0');
+      clock.className = 'timer' + (left <= 10 ? ' warn' : '');
+      if (left <= 0) { clearInterval(talkTimer); h.seconds = 60; toast('Sixty seconds up — now harvest what you heard.', 'info'); }
+      left--;
+    };
+    paint();
+    talkTimer = setInterval(paint, 1000);
+  };
+
+  /* --- filler tally --- */
+  const fillerCard = el('<div class="card"><h2>Filler tally</h2>' +
+    '<p class="sub">Tap while they speak. The total is compared against their rolling average in the feedback note.</p>' +
+    '<div class="counter-grid" id="fg"></div>' +
+    '<div class="row" style="margin-top:12px"><button class="btn ghost sm" data-reset>Reset tally</button>' +
+    '<span class="badge" id="ftotal"></span></div></div>');
+  body.appendChild(fillerCard);
+
+  const total = () => Object.values(h.fillers).reduce((a, b) => a + (b || 0), 0);
+  function paintFillers() {
+    const grid = $('#fg', fillerCard);
+    grid.innerHTML = '';
+    FILLERS.forEach(f => {
+      const box = el('<div class="counter"><div class="n">' + (h.fillers[f] || 0) + '</div><div class="w">' + esc(f) + '</div></div>');
+      box.onclick = () => { h.fillers[f] = (h.fillers[f] || 0) + 1; paintFillers(); };
+      box.oncontextmenu = e => { e.preventDefault(); h.fillers[f] = Math.max(0, (h.fillers[f] || 0) - 1); paintFillers(); };
+      grid.appendChild(box);
+    });
+    $('#ftotal', fillerCard).textContent = total() + ' total · right-click to subtract';
+  }
+  paintFillers();
+  $('[data-reset]', fillerCard).onclick = () => { h.fillers = {}; paintFillers(); };
+
+  /* --- harvested words --- */
+  const wordCard = el('<div class="card"><h2>Words they struggled with</h2>' +
+    '<p class="sub">Anything mispronounced, hesitated over, or avoided. These become the boss fight in the next stage.</p>' +
+    '<div class="row"><input id="w-in" placeholder="Type a word and press Enter — or paste several separated by commas" style="flex:1">' +
+    '<button class="btn sm" data-addw>Add</button></div>' +
+    '<div class="wordtags" id="wtags"></div></div>');
+  body.appendChild(wordCard);
+
+  function paintWords() {
+    const box = $('#wtags', wordCard);
+    box.innerHTML = '';
+    if (!h.words.length) box.appendChild(el('<span class="sub" style="margin:0">Nothing harvested yet.</span>'));
+    h.words.forEach((w, i) => {
+      const tag = el('<span class="wordtag">' + esc(w) + '<button title="remove">×</button></span>');
+      $('button', tag).onclick = () => { h.words.splice(i, 1); paintWords(); };
+      box.appendChild(tag);
+    });
+  }
+  function addWords(raw) {
+    String(raw).split(/[,;\n]+/).map(s => s.trim()).filter(Boolean).forEach(w => {
+      if (!h.words.some(x => x.toLowerCase() === w.toLowerCase())) h.words.push(w);
+    });
+    $('#w-in', wordCard).value = '';
+    paintWords();
+  }
+  $('[data-addw]', wordCard).onclick = () => addWords($('#w-in', wordCard).value);
+  $('#w-in', wordCard).addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); addWords(e.target.value); }
+  });
+  paintWords();
+
+  /* --- errors heard --- */
+  const errCard = el('<div class="card"><h2>Errors heard</h2>' +
+    '<p class="sub">Write what they actually said. Tagging the type is what makes a recurring problem visible next month.</p>' +
+    '<div class="row"><input id="e-in" placeholder="e.g. &quot;I go to cinema yesterday&quot;" style="flex:1;min-width:220px">' +
+    '<select id="e-type" style="width:180px">' + ERROR_TYPES.map(t => '<option>' + esc(t) + '</option>').join('') + '</select>' +
+    '<button class="btn sm" data-adde>Add</button></div>' +
+    '<div class="list" id="elist" style="margin-top:12px"></div></div>');
+  body.appendChild(errCard);
+
+  function paintErrors() {
+    const list = $('#elist', errCard);
+    list.innerHTML = '';
+    if (!h.errors.length) list.appendChild(el('<div class="empty">No errors logged.</div>'));
+    h.errors.forEach((er, i) => {
+      const row = el('<div class="item"><div class="grow"><div class="title" style="font-size:14px">' + esc(er.text) + '</div></div>' +
+        '<span class="badge">' + esc(er.type) + '</span><button class="btn ghost sm" data-x>Remove</button></div>');
+      $('[data-x]', row).onclick = () => { h.errors.splice(i, 1); paintErrors(); };
+      list.appendChild(row);
+    });
+  }
+  const addErr = () => {
+    const text = $('#e-in', errCard).value.trim();
+    if (!text) return;
+    h.errors.push({ text, type: $('#e-type', errCard).value });
+    $('#e-in', errCard).value = '';
+    paintErrors();
+  };
+  $('[data-adde]', errCard).onclick = addErr;
+  $('#e-in', errCard).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addErr(); } });
+  paintErrors();
+}
+
+/* =============================================================
+   STAGE 3 — PRONUNCIATION BOXING (embedded game, dynamic list)
+   ============================================================= */
+
+function b64(obj) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+}
+
+function stagePron(body) {
+  const harvested = (S.data.harvest.words || []).slice(0, 20);
+  const words = harvested.length ? harvested : forLevel(PRON_FALLBACK, S.trainee.level).slice(0, 8);
+  const usingFallback = !harvested.length;
+
+  body.appendChild(el(
+    '<div class="card tight"><div class="row between">' +
+      '<div><div class="eyebrow">Word list feeding the game</div>' +
+      '<div style="font-size:15px">' + words.map(w => '<span class="chip static" style="margin-right:6px">' + esc(w) + '</span>').join('') + '</div></div>' +
+      '<div class="row"><button class="btn ghost sm" data-edit>Edit list</button><button class="btn ghost sm" data-reload>Restart game</button></div>' +
+    '</div>' +
+    (usingFallback ? '<div class="notice info" style="margin:14px 0 0">Nothing was harvested in stage 2, so this is a level ' + esc(S.trainee.level) + ' fallback list.</div>' : '') +
+    '</div>'
+  ));
+
+  const frame = el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
+    encodeURIComponent(b64({ w: words, v: [] })) + '"></iframe>');
+  body.appendChild(frame);
+
+  S.data.pron = S.data.pron || { words };
+
+  $('[data-reload]', body).onclick = () => { frame.src = frame.src; };
+  $('[data-edit]', body).onclick = () => {
+    const current = $('#pron-edit');
+    if (current) return;
+    const editor = el('<div class="card" id="pron-edit"><h3>Word list</h3>' +
+      '<textarea id="pe">' + esc(words.join(', ')) + '</textarea>' +
+      '<div class="row" style="margin-top:10px"><button class="btn sm" data-apply>Apply and restart</button></div></div>');
+    body.insertBefore(editor, frame);
+    $('[data-apply]', editor).onclick = () => {
+      const next = $('#pe', editor).value.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean).slice(0, 20);
+      if (!next.length) { toast('Add at least one word.', 'err'); return; }
+      S.data.harvest.words = next;
+      S.data.pron = { words: next };
+      editor.remove();
+      draw();
+    };
+  };
+}
+
+/* Results posted back by the two embedded games. */
+function onGameMessage(event) {
+  const msg = event.data;
+  if (!msg || msg.source !== 'antoch-game' || !S) return;
+  if (msg.game === 'pronunciation') {
+    S.data.pron = Object.assign({}, S.data.pron, {
+      score: msg.score,
+      results: msg.results,
+      summary: msg.results
+        ? msg.results.filter(r => r.pct >= 85).length + ' of ' + msg.results.length + ' words clean · score ' + msg.score
+        : 'played'
+    });
+    const weak = (msg.results || []).filter(r => r.pct < 85).map(r => r.word);
+    if (weak.length) toast('Still shaky: ' + weak.join(', '), 'info');
+  }
+  if (msg.game === 'sentence') {
+    S.data.stage4 = Object.assign({}, S.data.stage4, {
+      kind: 'sentence',
+      score: msg.score,
+      built: msg.built,
+      summary: (msg.built || []).length + ' sentence(s) built · ' + (msg.mistakes || 0) + ' mistakes'
+    });
+  }
+  persist();
+}
+
+/* =============================================================
+   STAGE 4 — QUICK ROUND (sentence builder by default)
+   ============================================================= */
+
+function stageQuickRound(body) {
+  const kind = S.plan.stage4 || 'sentence';
+  if (kind === 'wordform') return stageWordForm(body);
+  if (kind === 'expansion') return stageExpansion(body);
+  if (kind === 'picture') return stagePicture(body);
+  return stageSentence(body);
+}
+
+function stageSentence(body) {
+  const sets = forLevel(SENTENCE_SETS, S.trainee.level);
+  const saved = S.data.stage4 && S.data.stage4.kind === 'sentence' ? S.data.stage4 : null;
+
+  const setup = el(
+    '<div class="card">' +
+      '<div class="grid two">' +
+        '<div class="field"><label>Question you ask out loud</label>' +
+          '<input id="q-in" placeholder="e.g. What did you do at the weekend?" value="' + esc((saved && saved.question) || '') + '"></div>' +
+        '<div class="field"><label>Answer sentence the trainee builds — put your 3 target words in it</label>' +
+          '<input id="s-in" placeholder="e.g. I visited my cousin on Saturday" value="' + esc((saved && saved.line) || '') + '"></div>' +
+      '</div>' +
+      '<div class="eyebrow">Pre-loaded sets for ' + esc(S.trainee.level) + '</div>' +
+      '<div class="chips" id="ss"></div>' +
+      '<div class="row" style="margin-top:16px"><button class="btn" data-launch>Load into the game</button>' +
+      '<span class="sub" style="margin:0">Keep it to one quick round.</span></div>' +
+    '</div>'
+  );
+  body.appendChild(setup);
+
+  sets.forEach(set => {
+    const chip = el('<span class="chip">' + esc(set.label) + '</span>');
+    chip.onclick = () => { $('#s-in', setup).value = set.lines.join(' | '); };
+    $('#ss', setup).appendChild(chip);
+  });
+
+  const holder = el('<div></div>');
+  body.appendChild(holder);
+
+  function launch() {
+    const question = $('#q-in', setup).value.trim();
+    const raw = $('#s-in', setup).value.trim();
+    const lines = raw.split('|').map(s => s.trim()).filter(Boolean);
+    if (!lines.length) { toast('Type the answer sentence first, or pick a set.', 'err'); return; }
+    S.data.stage4 = Object.assign({ kind: 'sentence' }, S.data.stage4, { question, line: raw });
+    holder.innerHTML = '';
+    if (question) holder.appendChild(el('<div class="prompt-box small" style="margin-bottom:14px">' + esc(question) + '</div>'));
+    holder.appendChild(el('<iframe class="gameframe" src="games/sentence.html#s=' +
+      encodeURIComponent(b64({ s: lines })) + '"></iframe>'));
+    persist();
+  }
+
+  $('[data-launch]', setup).onclick = launch;
+  if (saved && saved.line) launch();
+}
+
+/* =============================================================
+   DRILL — WORD FORMS
+   ============================================================= */
+
+function stageWordForm(body) {
+  const bank = forLevel(WORD_FORMS, S.trainee.level);
+  const store = S.data.extras.wordform = S.data.extras.wordform || { done: [], correct: 0, asked: 0 };
+  let item = pickOne(bank.filter(w => !store.done.includes(w.base))) || pickOne(bank);
+
+  const card = el('<div class="card"></div>');
+  body.appendChild(card);
+
+  const FIELDS = [
+    ['noun', 'Noun'],
+    ['verb', 'Infinitive'],
+    ['past', 'Past'],
+    ['adjective', 'Adjective / -ing']
+  ];
+
+  function drawItem() {
+    card.innerHTML =
+      '<div class="prompt-box">' + esc(item.base.charAt(0).toUpperCase() + item.base.slice(1)) + '</div>' +
+      '<div class="formgrid" style="margin-top:18px">' +
+        FIELDS.map(([k, label]) =>
+          '<div class="formcell" data-k="' + k + '"><label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">' +
+          label + '</label><input data-f="' + k + '"><div class="ans"></div></div>').join('') +
+      '</div>' +
+      '<div class="row" style="margin-top:16px">' +
+        '<button class="btn" data-check>Check</button>' +
+        '<button class="btn ghost" data-reveal>Reveal</button>' +
+        '<button class="btn ghost" data-nextword>Next word</button>' +
+        '<span class="spacer"></span><span class="badge">' + store.correct + ' / ' + store.asked + ' correct so far</span>' +
+      '</div>';
+
+    $('[data-check]', card).onclick = () => check(false);
+    $('[data-reveal]', card).onclick = () => check(true);
+    $('[data-nextword]', card).onclick = () => {
+      bank_score();
+      if (!store.done.includes(item.base)) store.done.push(item.base);
+      const remaining = bank.filter(w => !store.done.includes(w.base));
+      item = pickOne(remaining.length ? remaining : bank);
+      drawItem();
+      persist();
+    };
+    $$('input', card).forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') check(false); }));
+    $('input', card).focus();
+  }
+
+  /* Marking happens once per word, when the trainer moves on, so
+     that pressing Check twice does not distort the tally. */
+  function bank_score() {
+    if (store.done.includes(item.base)) return;
+    FIELDS.forEach(([k]) => {
+      const given = $('[data-k="' + k + '"] input', card).value.trim().toLowerCase();
+      if (!given) return;
+      store.asked++;
+      if ((item[k] || []).some(a => a.toLowerCase() === given)) store.correct++;
+    });
+    store.done.push(item.base);
+  }
+
+  function check(reveal) {
+    FIELDS.forEach(([k]) => {
+      const cell = $('[data-k="' + k + '"]', card);
+      const answers = item[k] || [];
+      const given = $('input', cell).value.trim().toLowerCase();
+      const ok = answers.some(a => a.toLowerCase() === given);
+      cell.className = 'formcell ' + (ok ? 'right' : given || reveal ? 'wrong' : '');
+      $('.ans', cell).textContent = ok ? '✓' : (reveal ? answers.join(' / ') : '');
+    });
+  }
+
+  drawItem();
+  S.onLeave = bank_score;   // mark the word in progress when the trainer moves on
+}
+
+/* =============================================================
+   DRILL — SENTENCE EXPANSION
+   ============================================================= */
+
+function stageExpansion(body) {
+  const bank = forLevel(EXPANSIONS, S.trainee.level);
+  const store = S.data.extras.expansion = S.data.extras.expansion || { base: '', steps: {} };
+  let item = bank.find(b => b.base === store.base) || pickOne(bank);
+  store.base = item.base;
+
+  const card = el('<div class="card"></div>');
+  body.appendChild(card);
+
+  function drawItem() {
+    card.innerHTML =
+      '<div class="row" style="margin-bottom:14px">' +
+        '<input id="ex-base" value="' + esc(item.base) + '" style="flex:1;font-size:18px">' +
+        '<button class="btn ghost sm" data-shuffle>Different sentence</button>' +
+      '</div>' +
+      EXPANSION_STEPS.map(step =>
+        '<div class="expansion-step"><div class="k">+ ' + step + '</div>' +
+        '<input data-s="' + step + '" value="' + esc(store.steps[step] || '') + '" placeholder="Type what they said after adding ' + step.toLowerCase() + '"></div>'
+      ).join('') +
+      '<div class="row" style="margin-top:14px"><button class="btn ghost sm" data-example>Show a model answer</button></div>' +
+      '<div id="ex-model"></div>';
+
+    $$('[data-s]', card).forEach(i => i.addEventListener('input', e => {
+      store.steps[e.target.dataset.s] = e.target.value;
+    }));
+    $('#ex-base', card).addEventListener('input', e => { store.base = e.target.value; });
+    $('[data-shuffle]', card).onclick = () => {
+      item = pickOne(bank.filter(b => b.base !== item.base)) || item;
+      store.base = item.base; store.steps = {};
+      drawItem(); persist();
+    };
+    $('[data-example]', card).onclick = () => {
+      $('#ex-model', card).innerHTML = '<div class="notice info" style="margin-top:12px">' + esc(item.example) + '</div>';
+    };
+  }
+
+  drawItem();
+}
+
+/* =============================================================
+   DRILL — PICTURE DESCRIPTION
+   ============================================================= */
+
+function stagePicture(body) {
+  const store = S.data.extras.picture = S.data.extras.picture || { url: '', credit: '', notes: '' };
+  const prompts = forLevel(PICTURE_PROMPTS, S.trainee.level);
+
+  const card = el('<div class="card">' +
+    '<div class="row" style="margin-bottom:14px">' +
+      '<button class="btn" data-new>New picture</button>' +
+      '<button class="btn gold" data-talk>Start 90 seconds</button>' +
+      '<div class="timer" id="p-clock" style="font-size:32px">01:30</div>' +
+      '<span class="spacer"></span><span class="sub" id="p-credit" style="margin:0"></span>' +
+    '</div>' +
+    '<div id="p-holder"><div class="empty">Tap “New picture” to pull one.</div></div>' +
+    '<div class="row" style="margin-top:12px">' +
+      '<input id="p-url" placeholder="…or paste any image URL and press Use" style="flex:1;min-width:220px">' +
+      '<button class="btn ghost sm" data-useurl>Use</button>' +
+    '</div>' +
+    '<div class="eyebrow" style="margin-top:18px">Follow-up prompts for ' + esc(S.trainee.level) + '</div>' +
+    '<div class="chips" id="p-prompts"></div>' +
+    '<div class="field" style="margin-top:16px"><label>Notes</label>' +
+      '<textarea id="p-notes" placeholder="Vocabulary gaps, anything worth carrying into the feedback note">' + esc(store.notes) + '</textarea></div>' +
+    '</div>');
+  body.appendChild(card);
+
+  prompts.forEach(p => {
+    const chip = el('<span class="chip gold">' + esc(p) + '</span>');
+    chip.onclick = () => chip.classList.toggle('on');
+    $('#p-prompts', card).appendChild(chip);
+  });
+  $('#p-notes', card).addEventListener('input', e => { store.notes = e.target.value; });
+
+  function show(url, credit) {
+    store.url = url; store.credit = credit || '';
+    $('#p-holder', card).innerHTML = '<img class="picture-frame" src="' + esc(url) + '" alt="">';
+    $('#p-credit', card).textContent = credit || '';
+    persist();
+  }
+  if (store.url) show(store.url, store.credit);
+
+  $('[data-new]', card).onclick = async () => {
+    $('#p-holder', card).innerHTML = '<div class="empty">Loading…</div>';
+    try {
+      const pic = await fetchPicture();
+      show(pic.url, pic.credit);
+    } catch (e) {
+      $('#p-holder', card).innerHTML = '<div class="notice err">Could not load an image: ' + esc(e.message) + '</div>';
+    }
+  };
+
+  const useTyped = () => {
+    const typed = $('#p-url', card).value.trim();
+    if (!/^https?:\/\//i.test(typed)) { toast('Paste a full image address starting with http.', 'err'); return; }
+    show(typed, 'Pasted by trainer');
+    $('#p-url', card).value = '';
+  };
+  $('[data-useurl]', card).onclick = useTyped;
+  $('#p-url', card).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); useTyped(); } });
+
+  let pt = null;
+  $('[data-talk]', card).onclick = () => {
+    clearInterval(pt);
+    let left = 90;
+    const clock = $('#p-clock', card);
+    const paint = () => {
+      clock.textContent = String(Math.floor(Math.max(0, left) / 60)).padStart(2, '0') + ':' + String(Math.max(0, left) % 60).padStart(2, '0');
+      clock.className = 'timer' + (left <= 15 ? ' warn' : '');
+      if (left <= 0) clearInterval(pt);
+      left--;
+    };
+    paint();
+    pt = setInterval(paint, 1000);
+  };
+}
+
+/* Unsplash when a key is configured — biased towards the odd and
+   the unexpected rather than clean stock photography. Without a key
+   the drill still runs on a neutral random source. */
+async function fetchPicture() {
+  const query = pickOne(PICTURE_QUERIES);
+
+  if (UNSPLASH_ACCESS_KEY) {
+    /* Search rather than /photos/random, on a shallow-but-not-first
+       page: the very top hits for any term are the polished stock
+       shots, which are the ones this drill is trying to avoid. */
+    const page = 1 + Math.floor(Math.random() * 6);
+    const url = 'https://api.unsplash.com/search/photos?orientation=landscape&content_filter=high' +
+      '&per_page=30&page=' + page +
+      '&query=' + encodeURIComponent(query) +
+      '&client_id=' + encodeURIComponent(UNSPLASH_ACCESS_KEY);
+    const res = await fetch(url);
+    if (res.status === 403) throw new Error('Unsplash hourly limit reached — try again shortly, or use the URL box below.');
+    if (!res.ok) throw new Error('Unsplash replied ' + res.status);
+    const j = await res.json();
+    const hits = (j.results || []).filter(p => p.urls && p.urls.regular);
+    if (hits.length) {
+      const pick = hits[Math.floor(Math.random() * hits.length)];
+      return {
+        url: pick.urls.regular,
+        credit: 'Photo: ' + ((pick.user && pick.user.name) || 'Unsplash') + ' on Unsplash · searched “' + query + '”'
+      };
+    }
+    /* fall through to the keyless source rather than dead-ending */
+  }
+
+  return {
+    url: 'https://picsum.photos/seed/' + Math.random().toString(36).slice(2) + '/1200/800',
+    credit: 'Random photo' + (UNSPLASH_ACCESS_KEY ? ' (Unsplash returned nothing for that search)' : ' · add an Unsplash key in config.js for quirkier images')
+  };
+}
+
+/* =============================================================
+   STAGE 5 — FEEDBACK NOTE
+   ============================================================= */
+
+function stageFeedback(body) {
+  const fb = S.data.feedback;
+
+  const inputs = el('<div class="card">' +
+    '<div class="grid two">' +
+      '<div class="field"><label>Today\'s win</label>' +
+        '<textarea id="f-win" placeholder="One thing that clearly went better">' + esc(fb.win) + '</textarea></div>' +
+      '<div class="field"><label>Focus for next time</label>' +
+        '<textarea id="f-focus" placeholder="One thing to work on before the next session">' + esc(fb.focus) + '</textarea></div>' +
+    '</div>' +
+    '<button class="btn sm" data-refresh>Rebuild note</button></div>');
+  body.appendChild(inputs);
+
+  const out = el('<div class="card"><div class="row between" style="margin-bottom:12px">' +
+    '<h2 style="margin:0">Note to read aloud</h2>' +
+    '<div class="row"><button class="btn sm" data-copy>Copy</button>' +
+    '<button class="btn sm ghost" data-dl>Download .txt</button></div></div>' +
+    '<div class="feedback-out" id="fout"></div></div>');
+  body.appendChild(out);
+
+  const paint = () => {
+    fb.win = $('#f-win', inputs).value;
+    fb.focus = $('#f-focus', inputs).value;
+    fb.text = buildNote();
+    $('#fout', out).textContent = fb.text;
+  };
+  paint();
+
+  $('#f-win', inputs).addEventListener('input', paint);
+  $('#f-focus', inputs).addEventListener('input', paint);
+  $('[data-refresh]', inputs).onclick = paint;
+  $('[data-copy]', out).onclick = async () => {
+    await copyText(fb.text);
+    toast('Note copied — paste it into the chat.');
+  };
+  $('[data-dl]', out).onclick = () => downloadText(
+    S.trainee.name.replace(/\s+/g, '-').toLowerCase() + '-' + new Date().toISOString().slice(0, 10) + '.txt',
+    fb.text
+  );
+}
+
+function fillerTotal(data) {
+  const f = (data.harvest && data.harvest.fillers) || {};
+  return Object.keys(f).reduce((sum, k) => sum + (f[k] || 0), 0);
+}
+
+/* The note is assembled from what was actually recorded — nothing
+   is invented, and a section is simply omitted when it is empty. */
+function buildNote() {
+  const t = S.trainee;
+  const h = S.data.harvest;
+  const fb = S.data.feedback;
+  const lines = [];
+
+  lines.push('ANTOCH SESSION TRAINER — ' + fmtDate(new Date().toISOString()));
+  lines.push(t.name + ' · level ' + t.level);
+  lines.push('');
+
+  if (h.topic) { lines.push('TOPIC'); lines.push(h.topic); lines.push(''); }
+
+  /* fillers versus the rolling average of finished sessions */
+  const today = fillerTotal(S.data);
+  const past = S.history.map(s => fillerTotal(s.data || {}));
+  const avg = past.length ? past.reduce((a, b) => a + b, 0) / past.length : null;
+  lines.push('FILLER WORDS');
+  if (avg === null) {
+    lines.push(today + ' today. This is your first recorded count, so it becomes the baseline.');
+  } else {
+    const diff = today - avg;
+    const verdict = Math.abs(diff) < 1 ? 'about the same as usual'
+      : diff < 0 ? Math.abs(diff).toFixed(1) + ' fewer than usual'
+        : diff.toFixed(1) + ' more than usual';
+    lines.push(today + ' today · rolling average ' + avg.toFixed(1) + ' over ' + past.length +
+      ' session' + (past.length === 1 ? '' : 's') + ' — ' + verdict + '.');
+  }
+  const breakdown = Object.entries(h.fillers || {}).filter(e => e[1]).sort((a, b) => b[1] - a[1]);
+  if (breakdown.length) lines.push('Breakdown: ' + breakdown.map(e => e[0] + ' ×' + e[1]).join(', '));
+  lines.push('');
+
+  if ((h.words || []).length) {
+    lines.push('WORDS WE DRILLED');
+    lines.push(h.words.join(', '));
+    const pron = S.data.pron;
+    if (pron && pron.results) {
+      const weak = pron.results.filter(r => r.pct < 85).map(r => r.word);
+      lines.push(weak.length ? 'Still shaky: ' + weak.join(', ') : 'All of them landed cleanly by the end.');
+    }
+    lines.push('');
+  }
+
+  if ((h.errors || []).length) {
+    lines.push('ERRORS LOGGED TODAY');
+    h.errors.forEach(e => lines.push('· ' + e.text + '   [' + e.type + ']'));
+    lines.push('');
+  }
+
+  /* one recurring error, only when it genuinely repeats */
+  const recurring = findRecurring(h.errors || []);
+  if (recurring) {
+    lines.push('RECURRING');
+    lines.push(recurring);
+    lines.push('');
+  }
+
+  const quick = S.data.stage4;
+  if (quick && quick.summary) {
+    lines.push('QUICK ROUND');
+    lines.push((DRILL_NAMES[quick.kind] || 'Quick round') + ' — ' + quick.summary);
+    lines.push('');
+  }
+
+  const wf = S.data.extras.wordform;
+  if (wf && wf.asked) {
+    lines.push('WORD FORMS');
+    lines.push(wf.correct + ' of ' + wf.asked + ' forms correct.');
+    lines.push('');
+  }
+
+  const pic = S.data.extras.picture;
+  if (pic && pic.notes) { lines.push('PICTURE DESCRIPTION'); lines.push(pic.notes); lines.push(''); }
+
+  if (fb.win) { lines.push("TODAY'S WIN"); lines.push(fb.win); lines.push(''); }
+  if (fb.focus) { lines.push('FOCUS FOR NEXT TIME'); lines.push(fb.focus); lines.push(''); }
+
+  return lines.join('\n').trim();
+}
+
+function findRecurring(todaysErrors) {
+  if (!todaysErrors.length || !S.history.length) return null;
+
+  const counts = {};
+  S.history.forEach(s => {
+    const seen = new Set(((s.data && s.data.harvest && s.data.harvest.errors) || []).map(e => e.type));
+    seen.forEach(type => { counts[type] = (counts[type] || 0) + 1; });
+  });
+
+  const todayTypes = Array.from(new Set(todaysErrors.map(e => e.type)));
+  let best = null;
+  todayTypes.forEach(type => {
+    const n = counts[type] || 0;
+    if (n > 0 && (!best || n > best.n)) best = { type, n };
+  });
+  if (!best) return null;
+
+  const total = S.history.length + 1;
+  return best.type + ' has now come up in ' + (best.n + 1) + ' of your last ' + total +
+    ' sessions. That is the pattern to attack, not a one-off slip.';
+}
