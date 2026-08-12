@@ -587,8 +587,9 @@ if(SR){
     if(emptyRuns >= 2 && speechMode === 'cloud'){
       const offer = document.getElementById('localBtn');
       setStatus(offer && offer.style.display !== 'none'
-        ? 'Nothing is coming back from the online recogniser — tap <b>Use offline speech</b> below.'
-        : 'Nothing is coming back from the online recogniser. Your connection may be blocking it.');
+        ? 'Nothing is coming back from the recogniser — tap <b>Use offline speech</b> below.'
+        : 'The recogniser is returning nothing. This is usually the browser, not you — '+
+          'try opening this page in <b>Microsoft Edge</b>.');
     }else{
       setStatus('Didn\'t catch that — tap the mic and try again.');
     }

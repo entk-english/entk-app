@@ -157,6 +157,19 @@ repository needs a paid plan.
 The microphone in the pronunciation game needs a secure origin. `localhost` and GitHub
 Pages both qualify; a plain `http://` address on your local network does not.
 
+### Use Microsoft Edge for lessons
+
+Speech recognition is not part of the page — the browser supplies it, and browsers differ.
+On this machine **Edge works and Chrome does not**: identical hardware, identical page,
+identical microphone, but Chrome's recogniser starts and ends without ever returning a
+word or raising an error, while Edge returns a clean transcript in about 2.5 seconds.
+
+If speech ever stops working, the fastest test is to open the same page in another browser
+before touching anything else. `mic-check.html` in this folder separates the possibilities:
+microphone permission, the input device, the recogniser itself, and the embedding frame.
+Its event trace is the part that matters — `soundstart` and `speechstart` firing prove the
+browser heard you, so their absence points at the browser rather than the microphone.
+
 ---
 
 ## Things worth knowing before a live lesson
