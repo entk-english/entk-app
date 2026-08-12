@@ -56,6 +56,27 @@ export async function render() {
 
 function go(hash) { location.hash = hash; }
 
+/* ---------------- theme ---------------- */
+
+function currentTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}
+
+function toggleTheme() {
+  const next = currentTheme() === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('ast:theme', next); } catch (e) {}
+  render();
+}
+
+function themeButton() {
+  const light = currentTheme() === 'light';
+  const b = el('<button class="themeBtn" title="Switch to ' + (light ? 'dark' : 'light') + ' theme">' +
+    (light ? '☾' : '☀') + '</button>');
+  b.onclick = toggleTheme;
+  return b;
+}
+
 function topbar(route) {
   const me = Store.me;
   const links = me.role === 'trainee'
@@ -76,6 +97,7 @@ function topbar(route) {
       '<button class="btn ghost sm" data-out>Sign out</button>' +
     '</header>'
   );
+  bar.insertBefore(themeButton(), $('[data-out]', bar));
   $$('[data-go]', bar).forEach(b => b.onclick = () => go('#/' + b.dataset.go));
   $('[data-out]', bar).onclick = async () => { await Store.signOut(); location.hash = ''; render(); };
   return bar;
@@ -126,6 +148,10 @@ function renderAuth() {
       '</div>'
     );
     wrap.appendChild(card);
+
+    const themeRow = el('<div class="row" style="justify-content:center;margin-top:14px"></div>');
+    themeRow.appendChild(themeButton());
+    card.appendChild(themeRow);
 
     $$('[data-tab]', card).forEach(b => b.onclick = () => { tab = b.dataset.tab; draw(); });
 
@@ -482,7 +508,7 @@ async function planDialog(t, sessions) {
       '<option value="sentence">Sentence Builder Game (default)</option>' +
       OPTIONAL_DRILLS.map(d => '<option value="' + d.id + '">' + esc(d.name) + ' (instead of Sentence Builder)</option>').join('') +
     '</select></div>' +
-    '<div class="field"><label>Extra rounds after the quick round</label><div class="chips" id="p-extra">' +
+    '<div class="field"><label>Extra rounds — tap to add, they are off unless you pick them</label><div class="chips" id="p-extra">' +
       OPTIONAL_DRILLS.map(d => '<span class="chip gold" data-x="' + d.id + '">' + esc(d.name) + '</span>').join('') +
     '</div></div>' +
     '<div class="field"><label>Free talk topic (optional — you can also type one live)</label>' +

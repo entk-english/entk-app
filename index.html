@@ -6,6 +6,14 @@
 <title>Antoch Session Trainer</title>
 <meta name="description" content="One-on-one English conversation coaching — session runner, drills and progress history.">
 <link rel="stylesheet" href="css/app.css">
+<script>
+  /* Applied before the stylesheet paints, so switching themes never
+     flashes the previous one. */
+  try {
+    var t = localStorage.getItem('ast:theme');
+    if (t) document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🥊</text></svg>">
 </head>
 <body>

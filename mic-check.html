@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Microphone check — Antoch Session Trainer</title>
+<style>
+  :root{ --bg:#0f0a1e; --panel:#1b1235; --line:#3a2a66; --text:#f3eeff; --muted:#a996d6;
+         --ok:#7cf5c4; --bad:#ff5d73; --warn:#ffd166; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;
+       padding:26px;line-height:1.5}
+  h1{font-size:24px;margin:0 0 4px}
+  p.sub{color:var(--muted);margin:0 0 22px;font-size:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:14px}
+  h2{font-size:16px;margin:0 0 10px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button{background:linear-gradient(180deg,#8ffcd0,#3fae7f);border:none;color:#06251a;font-weight:700;
+         font-size:15px;padding:11px 22px;border-radius:10px;cursor:pointer;font-family:inherit}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .line{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid rgba(124,92,200,.18);font-size:14px}
+  .line:last-child{border-bottom:none}
+  .line .k{flex:1;color:var(--muted)}
+  .line .v{font-weight:600;text-align:right;max-width:60%}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+  #meter{height:22px;background:#0a0618;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:10px}
+  #bar{height:100%;width:0%;background:linear-gradient(90deg,#7cf5c4,#ffd166,#ff5d73);transition:width .07s}
+  #summary{font-size:15px;white-space:pre-wrap;font-family:Consolas,monospace}
+  iframe{width:100%;height:118px;border:1px solid var(--line);border-radius:10px;background:#0a0618}
+  code{background:#0a0618;padding:2px 6px;border-radius:5px;font-size:13px}
+</style>
+</head>
+<body>
+
+<h1>Microphone check</h1>
+<p class="sub">Run every section top to bottom, then send the summary at the bottom.</p>
+
+<div class="card">
+  <h2>1. Environment</h2>
+  <div id="env"></div>
+</div>
+
+<div class="card">
+  <h2>2. Can the browser open your microphone?</h2>
+  <div class="row"><button id="gum">Open microphone</button></div>
+  <div id="gumOut"></div>
+</div>
+
+<div class="card">
+  <h2>3. Is sound actually reaching it?</h2>
+  <p class="sub" style="margin:0 0 8px">Speak normally. The bar must move. If it stays flat, the browser
+  is listening to the wrong input device.</p>
+  <div id="meter"><div id="bar"></div></div>
+  <div id="levelOut"></div>
+</div>
+
+<div class="card">
+  <h2>4. Speech recognition on this page</h2>
+  <p class="sub" style="margin:0 0 8px">Click, then say <b>water</b> clearly.</p>
+  <div class="row"><button id="sr" disabled>Start listening</button></div>
+  <div id="srOut"></div>
+</div>
+
+<div class="card">
+  <h2>5. Speech recognition inside an embedded frame</h2>
+  <p class="sub" style="margin:0 0 8px">This is how the game runs inside the app. Same test, one layer deeper.</p>
+  <iframe id="frame" allow="microphone"></iframe>
+  <div id="frameOut"></div>
+</div>
+
+<div class="card">
+  <h2>Summary — copy this back</h2>
+  <div id="summary">Run the sections above.</div>
+  <div class="row" style="margin-top:12px"><button id="copy">Copy summary</button></div>
+</div>
+
+<script>
+const R = {};                       // every result lands here
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function put(el, key, value, cls){
+  R[key] = value;
+  const d = document.createElement('div');
+  d.className = 'line';
+  d.innerHTML = '<span class="k">'+key+'</span><span class="v '+(cls||'')+'">'+value+'</span>';
+  document.getElementById(el).appendChild(d);
+  paintSummary();
+}
+
+function paintSummary(){
+  document.getElementById('summary').textContent =
+    Object.keys(R).map(k => k+': '+R[k]).join('\n');
+}
+
+/* ---- 1. environment ---- */
+put('env','browser', navigator.userAgent.replace(/^Mozilla\/5\.0 /,'').slice(0,90));
+put('env','page address', location.origin);
+put('env','secure context', window.isSecureContext ? 'yes' : 'NO — speech will not work',
+    window.isSecureContext ? 'ok' : 'bad');
+put('env','SpeechRecognition available', SR ? 'yes' : 'NO — this browser cannot do it',
+    SR ? 'ok' : 'bad');
+put('env','MediaRecorder available', window.MediaRecorder ? 'yes' : 'no',
+    window.MediaRecorder ? 'ok' : 'warn');
+if (navigator.permissions && navigator.permissions.query){
+  navigator.permissions.query({name:'microphone'})
+    .then(p => put('env','permission state', p.state, p.state==='granted'?'ok':p.state==='denied'?'bad':'warn'))
+    .catch(()=> put('env','permission state','could not read','warn'));
+}
+
+/* ---- 2 + 3. getUserMedia and live level ---- */
+let stream = null, audioCtx = null;
+document.getElementById('gum').onclick = async () => {
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    const track = stream.getAudioTracks()[0];
+    put('gumOut','microphone opened','yes','ok');
+    put('gumOut','device in use', track.label || '(name hidden until permission granted)');
+    put('gumOut','track state', track.readyState + ', muted=' + track.muted,
+        track.readyState==='live' && !track.muted ? 'ok' : 'bad');
+    document.getElementById('sr').disabled = !SR;
+    startMeter();
+    listDevices();
+  }catch(e){
+    put('gumOut','microphone opened','NO — '+e.name+': '+e.message,'bad');
+  }
+};
+
+async function listDevices(){
+  try{
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const ins = all.filter(d=>d.kind==='audioinput');
+    put('gumOut','inputs found', ins.length + ' — ' + ins.map(d=>d.label||'unnamed').join(' | ').slice(0,120));
+  }catch(e){}
+}
+
+let peak = 0;
+function startMeter(){
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(stream);
+  const an = audioCtx.createAnalyser();
+  an.fftSize = 512;
+  src.connect(an);
+  const buf = new Uint8Array(an.fftSize);
+  let reported = false;
+  (function loop(){
+    an.getByteTimeDomainData(buf);
+    let max = 0;
+    for (let i=0;i<buf.length;i++) max = Math.max(max, Math.abs(buf[i]-128));
+    const pct = Math.min(100, (max/128)*100*2.2);
+    document.getElementById('bar').style.width = pct+'%';
+    peak = Math.max(peak, pct);
+    if (peak > 6 && !reported){
+      reported = true;
+      put('levelOut','sound detected','yes — the microphone is working','ok');
+    }
+    requestAnimationFrame(loop);
+  })();
+  setTimeout(()=>{
+    if (peak <= 6) put('levelOut','sound detected',
+      'NO — bar never moved. Wrong input device, or the mic is muted in Windows.','bad');
+  }, 9000);
+}
+
+/* ---- 4. speech recognition here ---- */
+document.getElementById('sr').onclick = () => {
+  const rec = new SR();
+  rec.lang = 'en-US';
+  rec.maxAlternatives = 5;
+  let got = false;
+  const t0 = Date.now();
+  document.getElementById('sr').disabled = true;
+  document.getElementById('sr').textContent = 'Listening… say "water"';
+  rec.onresult = e => {
+    got = true;
+    const alts = [];
+    for (let i=0;i<e.results[0].length;i++) alts.push(e.results[0][i].transcript);
+    put('srOut','recognition on page','HEARD: "'+alts.join('" / "')+'"','ok');
+  };
+  rec.onerror = e => put('srOut','recognition on page','FAILED — error: '+e.error,'bad');
+  rec.onend = () => {
+    document.getElementById('sr').disabled = false;
+    document.getElementById('sr').textContent = 'Start listening';
+    if (!got) put('srOut','recognition ended','no result after '+((Date.now()-t0)/1000).toFixed(1)+'s','warn');
+  };
+  try{ rec.start(); }
+  catch(e){ put('srOut','recognition on page','could not start — '+e.message,'bad'); }
+};
+
+/* ---- 5. the same thing one frame deeper ---- */
+const inner = `<!DOCTYPE html><html><body style="margin:0;background:#0a0618;color:#f3eeff;
+font-family:system-ui;padding:12px">
+<button id="b" style="padding:10px 18px;border-radius:9px;border:none;background:#ffd166;font-weight:700;
+cursor:pointer">Start listening in frame</button>
+<div id="o" style="margin-top:9px;font-size:14px">idle</div>
+<script>
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const o = document.getElementById('o');
+if (!SR){ o.textContent = 'SpeechRecognition missing inside frame';
+  parent.postMessage({t:'frame', v:'MISSING inside frame'}, '*'); }
+document.getElementById('b').onclick = () => {
+  const r = new SR(); r.lang='en-US'; let got=false;
+  o.textContent = 'listening… say "water"';
+  r.onresult = e => { got=true; const t=e.results[0][0].transcript;
+    o.textContent = 'heard: '+t; parent.postMessage({t:'frame', v:'HEARD: "'+t+'"'}, '*'); };
+  r.onerror = e => { o.textContent='error: '+e.error;
+    parent.postMessage({t:'frame', v:'FAILED — error: '+e.error}, '*'); };
+  r.onend = () => { if(!got){ o.textContent='ended with no result';
+    parent.postMessage({t:'frame', v:'no result'}, '*'); } };
+  try{ r.start(); }catch(err){ o.textContent='start threw: '+err.message;
+    parent.postMessage({t:'frame', v:'start threw: '+err.message}, '*'); }
+};
+<\/script></body></html>`;
+document.getElementById('frame').srcdoc = inner;
+window.addEventListener('message', e => {
+  if (e.data && e.data.t === 'frame')
+    put('frameOut','recognition in frame', e.data.v, /HEARD/.test(e.data.v) ? 'ok' : 'bad');
+});
+
+/* ---- copy ---- */
+document.getElementById('copy').onclick = () => {
+  const text = document.getElementById('summary').textContent;
+  navigator.clipboard.writeText(text).then(
+    ()=>{ document.getElementById('copy').textContent = 'Copied'; },
+    ()=>{ const t=document.createElement('textarea'); t.value=text; document.body.appendChild(t);
+          t.select(); document.execCommand('copy'); t.remove();
+          document.getElementById('copy').textContent = 'Copied'; });
+};
+</script>
+</body>
+</html>

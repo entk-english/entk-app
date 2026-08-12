@@ -14,7 +14,7 @@ import {
   WORD_FORMS, EXPANSIONS, EXPANSION_STEPS, PICTURE_QUERIES, PICTURE_PROMPTS,
   FILLERS, ERROR_TYPES, LEVEL_LABEL, forLevel, pickOne
 } from './content.js';
-import { esc, el, $, $$, toast, confirmBox, copyText, downloadText, fmtDate } from './ui.js';
+import { esc, el, $, $$, toast, modal, confirmBox, copyText, downloadText, fmtDate } from './ui.js';
 
 const DRILL_NAMES = {
   sentence: 'Sentence Builder',
@@ -34,9 +34,13 @@ export async function runSession(root, sessionId, backToApp) {
   const history = sessions.filter(s => s.trainee_id === record.trainee_id && s.id !== sessionId && s.ended_at);
 
   const plan = record.plan || {};
-  const stages = ['warmup', 'harvest', 'pron', 'stage4']
+  const planned = ['warmup', 'harvest', 'pron', 'stage4']
     .concat((plan.extras || []).filter(x => x !== plan.stage4))
     .concat(['feedback']);
+  /* A drill added mid-session is remembered, so reopening the
+     session does not silently drop it. */
+  const saved = (record.data || {}).stage_list;
+  const stages = Array.isArray(saved) && saved.length ? saved : planned;
 
   S = {
     root, record, trainee, history, plan, stages, backToApp,
@@ -69,6 +73,7 @@ const STAGE_META = {
   harvest: { title: 'Free Talk / Error Harvest', target: 270, blurb: 'Sixty seconds of unbroken speech, then you log what you heard.' },
   pron: { title: 'Pronunciation Boxing', target: 600, blurb: 'The words harvested a minute ago are now the boss fight.' },
   stage4: { title: 'Quick Round', target: 150, blurb: 'Short and sharp. Do not let this become a long drill.' },
+  sentence: { title: 'Sentence Builder', target: 150, blurb: 'Quick round — question, then build the answer.' },
   wordform: { title: 'Word Form Drill', target: 180, blurb: 'Noun, infinitive, past, adjective.' },
   expansion: { title: 'Sentence Expansion', target: 180, blurb: 'What, when, where, why — one at a time.' },
   picture: { title: 'Picture Description', target: 120, blurb: '60 to 90 seconds of description, then follow-ups.' },
@@ -98,6 +103,8 @@ function draw() {
         (i + 1) + '. ' + esc(meta(s).title) + '</span>').join('') + '</div>' +
       '<div><div class="timer" id="clock">00:00</div>' +
         '<div class="timer-target">suggested ' + Math.round(m.target / 60) + ' min</div></div>' +
+      '<button class="btn ghost sm" data-adddrill title="Insert a drill after this stage">+ Drill</button>' +
+      '<button class="themeBtn" data-theme-toggle title="Switch theme">☀</button>' +
       '<button class="btn ghost sm" data-back>Back</button>' +
       '<button class="btn" data-next>' + (S.idx === S.stages.length - 1 ? 'Finish' : 'Next stage') + '</button>' +
       '<button class="btn ghost sm" data-exit>Exit</button>' +
@@ -118,6 +125,45 @@ function draw() {
   S.root.innerHTML = '';
   S.root.appendChild(shell);
 
+  const themeBtn = $('[data-theme-toggle]', bar);
+  const paintThemeBtn = () => {
+    themeBtn.textContent = document.documentElement.getAttribute('data-theme') === 'light' ? '☾' : '☀';
+  };
+  paintThemeBtn();
+  themeBtn.onclick = () => {
+    const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('ast:theme', next); } catch (e) {}
+    paintThemeBtn();
+  };
+
+  /* Drills are chosen when the session is planned, but a trainer
+     often only sees the need for one once the lesson is running. */
+  $('[data-adddrill]', bar).onclick = async () => {
+    const options = [
+      ['picture', 'Picture Description'],
+      ['wordform', 'Word Form Drill'],
+      ['expansion', 'Sentence Expansion'],
+      ['sentence', 'Sentence Builder']
+    ];
+    const chosen = await modal(
+      '<h2>Add a drill</h2><p class="sub">It slots in straight after the stage you are on.</p>' +
+      '<div class="chips">' + options.map(([id, label]) =>
+        '<span class="chip gold" data-pick="' + id + '">' + esc(label) + '</span>').join('') + '</div>' +
+      '<div class="row" style="margin-top:18px"><button class="btn ghost" data-cancel>Cancel</button></div>',
+      (card, close) => {
+        $$('[data-pick]', card).forEach(c => c.onclick = () => close(c.dataset.pick));
+        $('[data-cancel]', card).onclick = () => close(null);
+      }
+    );
+    if (!chosen) return;
+    S.stages.splice(S.idx + 1, 0, chosen);
+    S.data.stage_list = S.stages;
+    await persist();
+    draw();
+    toast('Added — it is the next stage.');
+  };
+
   $('[data-next]', bar).onclick = () => advance(1);
   $('[data-back]', bar).onclick = () => advance(-1);
   $('[data-exit]', bar).onclick = async () => {
@@ -136,6 +182,7 @@ function draw() {
     harvest: stageHarvest,
     pron: stagePron,
     stage4: stageQuickRound,
+    sentence: stageSentence,
     wordform: stageWordForm,
     expansion: stageExpansion,
     picture: stagePicture,
