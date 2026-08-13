@@ -591,6 +591,13 @@ async function viewMyHistory(body) {
   body.appendChild(el('<div><h1>' + esc(me.name) + '</h1><p class="sub">' + esc(LEVEL_LABEL[me.level] || me.level) +
     ' · ' + sessions.length + ' session' + (sessions.length === 1 ? '' : 's') + '</p></div>'));
 
+  /* A session with no end time is one the trainer is running right now.
+     The trainee's screen follows it, so they are in the lesson rather
+     than looking at last month's notes while it happens. */
+  const liveHost = el('<div></div>');
+  body.appendChild(liveHost);
+  followLiveSession(liveHost, me);
+
   if (!sessions.length) { body.appendChild(el('<div class="empty">Your first session has not happened yet.</div>')); return; }
 
   const list = el('<div class="list"></div>');
@@ -606,6 +613,95 @@ async function viewMyHistory(body) {
     list.appendChild(item);
   });
   body.appendChild(list);
+}
+
+
+/* ---------------- trainee's live session view ---------------- */
+
+let liveTimer = null;
+
+const LIVE_STAGE_LABEL = {
+  warmup: 'Warm-up',
+  harvest: 'Free talk',
+  pron: 'Pronunciation battle',
+  stage4: 'Quick round',
+  wordform: 'Word forms',
+  expansion: 'Sentence expansion',
+  picture: 'Picture description',
+  feedback: 'Feedback'
+};
+
+function b64(obj) {
+  return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+}
+
+async function followLiveSession(host, trainee) {
+  clearInterval(liveTimer);
+
+  let lastKey = '';
+
+  const tick = async () => {
+    if (!document.body.contains(host)) { clearInterval(liveTimer); return; }
+    let live = null;
+    try {
+      const rows = await Store.listSessions(trainee.id);
+      live = rows.find(r => !r.ended_at) || null;
+    } catch (e) { return; }
+
+    if (!live) {
+      if (lastKey !== 'none') {
+        lastKey = 'none';
+        host.innerHTML = '';
+        host.appendChild(el('<div class="notice info">No session running right now. When your trainer starts one, it appears here automatically.</div>'));
+      }
+      return;
+    }
+
+    const d = live.data || {};
+    const stages = Array.isArray(d.stage_list) && d.stage_list.length
+      ? d.stage_list
+      : ['warmup', 'harvest', 'pron', 'stage4', 'feedback'];
+    const idx = Math.min(Math.max(0, d.stage_index || 0), stages.length - 1);
+    const stage = stages[idx];
+    const words = (d.harvest && d.harvest.words) || [];
+
+    /* only rebuild when something actually changed, so an embedded
+       game is not torn down and restarted every few seconds */
+    const key = stage + '|' + idx + '|' + words.join(',') + '|' + ((d.harvest && d.harvest.topic) || '');
+    if (key === lastKey) return;
+    lastKey = key;
+
+    host.innerHTML = '';
+    host.appendChild(el(
+      '<div class="card"><div class="row between">' +
+        '<div><div class="eyebrow" style="color:var(--accent)">● Session live now</div>' +
+        '<h2 style="margin:4px 0 0">' + esc(LIVE_STAGE_LABEL[stage] || stage) + '</h2>' +
+        '<p class="sub" style="margin:4px 0 0">Stage ' + (idx + 1) + ' of ' + stages.length + '</p></div>' +
+        '<span class="badge level">follow along</span>' +
+      '</div></div>'
+    ));
+
+    if (stage === 'harvest' && d.harvest && d.harvest.topic) {
+      host.appendChild(el('<div class="prompt-box">' + esc(d.harvest.topic) + '</div>'));
+    }
+
+    if (stage === 'pron' && words.length) {
+      host.appendChild(el('<p class="sub">Your words for today — say each one when your trainer asks.</p>'));
+      host.appendChild(el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
+        encodeURIComponent(b64({ w: words.slice(0, 20), v: [] })) + '"></iframe>'));
+    } else if (words.length) {
+      host.appendChild(el('<div class="card tight"><div class="eyebrow">Words from today</div><div class="chips">' +
+        words.map(w => '<span class="chip static">' + esc(w) + '</span>').join('') + '</div></div>'));
+    }
+
+    if (stage === 'feedback' && d.feedback && d.feedback.text) {
+      host.appendChild(el('<div class="card"><h2>Today\'s note</h2><div class="feedback-out">' +
+        esc(d.feedback.text) + '</div></div>'));
+    }
+  };
+
+  await tick();
+  liveTimer = setInterval(tick, 4000);
 }
 
 /* =============================================================
