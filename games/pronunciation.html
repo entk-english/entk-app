@@ -969,7 +969,7 @@ function applyResult(pct, heard, entry, manual){
     state.combo++;
     state.bestCombo = Math.max(state.bestCombo, state.combo);
     state.score += pct + state.combo*5;
-    const dmg = Math.round(state.bossMax * (stars===3?0.55:stars===2?0.42:0.3) + state.combo*2);
+    const dmg = Math.round(state.bossMax * (stars===3?0.36:stars===2?0.28:0.2) + state.combo*1.5);
     const atk = attackFor(state.combo, stars);
     heroAnim.cast = 1;
     setStatus(manual ? '✓ Marked good — nice one.'
@@ -1483,8 +1483,11 @@ function drawHero(t){
        and falls on each stride, and kicks up dust at every footfall. */
     if(marchT>0 || travel>0){
       const step = Math.sin(t*13);
-      ctx.translate(24*(1-Math.max(marchT,travel)), -Math.abs(step)*11);
-      ctx.rotate(step*0.07 + 0.05);
+      /* Walk out to the right, towards where the next monster will
+         stand. A 24px shuffle was too small to read as walking. */
+      const gone = 1 - Math.max(marchT, travel);
+      ctx.translate(300 * gone, -Math.abs(step)*13);
+      ctx.rotate(step*0.08 + 0.06);
       if(Math.abs(step) > 0.97 && Math.random() < 0.4){
         const hp = heroPos();
         burst(hp.x-18, hp.y+74, 'rgba(255,240,210,0.9)', 4);

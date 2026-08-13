@@ -46,6 +46,7 @@ export async function render() {
     if (route === 'trainee' && arg) await viewTrainee(body, arg);
     else if (route === 'admin') await viewAdmin(body);
     else if (route === 'settings') await viewSettings(body);
+    else if (route === 'live') await viewLive(body);
     else if (route === 'history') await viewMyHistory(body);
     else if (Store.me.role === 'trainee') await viewMyHistory(body);
     else await viewTrainees(body);
@@ -82,7 +83,7 @@ function themeButton() {
 function topbar(route) {
   const me = Store.me;
   const links = me.role === 'trainee'
-    ? [['history', 'My sessions']]
+    ? (liveSessionOpen ? [['live', '● Follow along'], ['history', 'My sessions']] : [['history', 'My sessions']])
     : [['', 'Trainees']].concat(me.role === 'admin' ? [['admin', 'People & access']] : []);
   links.push(['settings', 'Settings']);
 
@@ -618,6 +619,26 @@ async function viewMyHistory(body) {
 
 /* ---------------- trainee's live session view ---------------- */
 
+/* Set whenever a live session is seen, so the top bar can offer the
+   Follow along tab only when there is something to follow. */
+let liveSessionOpen = false;
+
+/* The dedicated page: the trainee lands on whatever stage the trainer
+   is on, and plays the game on their own device. */
+async function viewLive(body) {
+  const trainees = await Store.listTrainees();
+  const me = trainees[0];
+  if (!me) {
+    body.appendChild(el('<div class="notice info">Your account is not linked to a trainee record yet.</div>'));
+    return;
+  }
+  body.appendChild(el('<div><h1>Follow along</h1><p class="sub">You are on the same stage as your trainer. This page keeps itself up to date.</p></div>'));
+  const host = el('<div></div>');
+  body.appendChild(host);
+  await followLiveSession(host, me);
+}
+
+
 let liveTimer = null;
 
 const LIVE_STAGE_LABEL = {
@@ -649,13 +670,19 @@ async function followLiveSession(host, trainee) {
     } catch (e) { return; }
 
     if (!live) {
+      const was = liveSessionOpen;
+      liveSessionOpen = false;
       if (lastKey !== 'none') {
         lastKey = 'none';
         host.innerHTML = '';
         host.appendChild(el('<div class="notice info">No session running right now. When your trainer starts one, it appears here automatically.</div>'));
       }
+      if (was && location.hash.indexOf('live') >= 0) render();
       return;
     }
+    const firstSighting = !liveSessionOpen;
+    liveSessionOpen = true;
+    if (firstSighting && location.hash.indexOf('live') < 0) render();
 
     const d = live.data || {};
     const stages = Array.isArray(d.stage_list) && d.stage_list.length
@@ -677,9 +704,13 @@ async function followLiveSession(host, trainee) {
         '<div><div class="eyebrow" style="color:var(--accent)">● Session live now</div>' +
         '<h2 style="margin:4px 0 0">' + esc(LIVE_STAGE_LABEL[stage] || stage) + '</h2>' +
         '<p class="sub" style="margin:4px 0 0">Stage ' + (idx + 1) + ' of ' + stages.length + '</p></div>' +
-        '<span class="badge level">follow along</span>' +
+        (location.hash.indexOf('live') < 0
+          ? '<button class="btn" data-follow>Follow along</button>'
+          : '<span class="badge level">you are following</span>') +
       '</div></div>'
     ));
+    const jump = $('[data-follow]', host);
+    if (jump) jump.onclick = () => { location.hash = '#/live'; };
 
     if (stage === 'harvest' && d.harvest && d.harvest.topic) {
       host.appendChild(el('<div class="prompt-box">' + esc(d.harvest.topic) + '</div>'));

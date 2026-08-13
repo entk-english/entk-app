@@ -243,6 +243,21 @@ function cleanup() {
    STAGE 1 — WARM-UP
    ============================================================= */
 
+/* Prompts the trainer writes themselves, kept per trainee so one
+   learner's running jokes do not surface in somebody else's warm-up.
+   Held on this device: they survive reloads but do not sync across
+   machines, which is a fair trade for needing no schema change. */
+function ownKey(format) { return 'ast:prompts:' + S.trainee.id + ':' + format; }
+
+function ownPrompts(format) {
+  try { return JSON.parse(localStorage.getItem(ownKey(format))) || []; }
+  catch (e) { return []; }
+}
+
+function saveOwnPrompts(format, list) {
+  try { localStorage.setItem(ownKey(format), JSON.stringify(list)); } catch (e) {}
+}
+
 function stageWarmup(body) {
   const rotation = WARMUP_FORMATS[(S.plan.warmupIndex || 0) % WARMUP_FORMATS.length];
   let format = (S.data.warmup && S.data.warmup.id) || rotation.id;
@@ -253,7 +268,8 @@ function stageWarmup(body) {
 
   function drawFormat() {
     const def = WARMUP_FORMATS.find(f => f.id === format);
-    const bank = forLevel(WARMUPS[format], level);
+    const mine = ownPrompts(format);
+    const bank = forLevel(WARMUPS[format], level).concat(mine);
     S.data.warmup = { id: format, format: def.name };
 
     let promptHTML;
@@ -270,10 +286,40 @@ function stageWarmup(body) {
       '<div class="prompt-box" id="wprompt">' + promptHTML + '</div>' +
       '<p class="sub" style="margin:14px 0 0">' + esc(def.hint) + '</p>' +
       '<div class="row" style="margin-top:14px"><button class="btn sm" data-again>Next prompt</button>' +
-      '<span class="badge">rotation suggests: ' + esc(rotation.name) + '</span></div>';
+      '<span class="badge">' + bank.length + ' in the pool</span>' +
+      '<span class="badge">rotation suggests: ' + esc(rotation.name) + '</span></div>' +
+      '<div class="field" style="margin-top:16px"><label>Add your own — it joins this trainee&#39;s rotation</label>' +
+        '<div class="row"><input id="own-in" placeholder="Type a prompt and press Enter" style="flex:1;min-width:220px">' +
+        '<button class="btn sm" data-addown>Add</button></div></div>' +
+      (mine.length
+        ? '<div class="chips">' + mine.map((p, i) =>
+            '<span class="chip gold">' + esc(p) +
+            ' <button data-delown="' + i + '" title="remove" style="background:none;border:none;color:inherit;cursor:pointer;padding:0 0 0 5px">×</button></span>'
+          ).join('') + '</div>'
+        : '');
 
     $$('[data-f]', card).forEach(c => c.onclick = () => { format = c.dataset.f; drawFormat(); });
     $('[data-again]', card).onclick = drawFormat;
+
+    const addOwn = () => {
+      const box = $('#own-in', card);
+      const text = box.value.trim();
+      if (!text) return;
+      saveOwnPrompts(format, ownPrompts(format).concat([text]));
+      box.value = '';
+      drawFormat();
+      toast('Added — it is in the rotation now.');
+    };
+    $('[data-addown]', card).onclick = addOwn;
+    $('#own-in', card).addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); addOwn(); }
+    });
+    $$('[data-delown]', card).forEach(b => b.onclick = () => {
+      const list = ownPrompts(format);
+      list.splice(+b.dataset.delown, 1);
+      saveOwnPrompts(format, list);
+      drawFormat();
+    });
   }
 
   drawFormat();
