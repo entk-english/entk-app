@@ -432,7 +432,48 @@ let shake=0;
    AUDIO — tiny synth so hits/wins have feel without asset files
    ============================================================ */
 let actx=null;
+/* Sounds are synthesised rather than loaded: no files to host, nothing
+   to wait for, and it cannot break a lesson by failing to download. */
+function tone(freq, dur, kind, vol, slideTo){
+  if(!actx) return;
+  const t0 = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = kind || 'sine';
+  o.frequency.setValueAtTime(freq, t0);
+  if(slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(30,slideTo), t0+dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol||0.18, t0+0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t0); o.stop(t0+dur+0.02);
+}
+
+function noiseHit(dur, vol){
+  if(!actx) return;
+  const n = Math.floor(actx.sampleRate * dur);
+  const buf = actx.createBuffer(1, n, actx.sampleRate);
+  const data = buf.getChannelData(0);
+  for(let i=0;i<n;i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/n, 2.2);
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const g = actx.createGain(); g.gain.value = vol || 0.3;
+  const f = actx.createBiquadFilter(); f.type='lowpass'; f.frequency.value=1400;
+  src.connect(f); f.connect(g); g.connect(actx.destination);
+  src.start();
+}
+
 function sfx(type){
+  /* the richer impacts sit alongside the original chimes */
+  try{
+    if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+    if(type==='flame'){ noiseHit(0.34,0.34); tone(180,0.3,'sawtooth',0.16,60); return; }
+    if(type==='blast'){ noiseHit(0.5,0.45); tone(120,0.45,'square',0.2,40); tone(320,0.3,'sawtooth',0.12,90); return; }
+    if(type==='land'){ noiseHit(0.28,0.4); tone(90,0.26,'sine',0.24,45); return; }
+    if(type==='march'){ tone(320,0.07,'triangle',0.07); return; }
+  }catch(e){}
+  return sfxLegacy(type);
+}
+
+function sfxLegacy(type){
   try{
     if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
     const t=actx.currentTime;
@@ -929,6 +970,7 @@ function applyResult(pct, heard, entry, manual){
     state.bestCombo = Math.max(state.bestCombo, state.combo);
     state.score += pct + state.combo*5;
     const dmg = Math.round(state.bossMax * (stars===3?0.55:stars===2?0.42:0.3) + state.combo*2);
+    const atk = attackFor(state.combo, stars);
     heroAnim.cast = 1;
     setStatus(manual ? '✓ Marked good — nice one.'
             : stars===3? '⭐⭐⭐ Perfect — '+pct+'%'
@@ -936,17 +978,19 @@ function applyResult(pct, heard, entry, manual){
             : '⭐ Close — '+pct+'%. '+entry.rule.tip);
     sfx('hit');
     setTimeout(()=>{
-      queueProj(heroPos(), bossPos(), '#ff9a3c', ()=>{
+      queueProj(heroPos(), bossPos(), atk.core, ()=>{
         state.bossHP = Math.max(0, state.bossHP-dmg);
         bossAnim.hit=1; shake=15;
-        burst(bossPos().x,bossPos().y,'#ffd166',46);
-        burst(bossPos().x,bossPos().y,'#ff8a3c',34);
-        burst(bossPos().x,bossPos().y,'#fff6d0',22);
-        shake=Math.max(shake,17);
-        for(let k=0;k<3;k++){
-          rings.push({x:bossPos().x,y:bossPos().y,r:6+k*14,max:120+k*40,life:30+k*6,
-                      color:k===1?'#ff8a3c':'#ffd166'});
+        burst(bossPos().x,bossPos().y,atk.core,atk.n);
+        burst(bossPos().x,bossPos().y,atk.edge,Math.round(atk.n*0.7));
+        burst(bossPos().x,bossPos().y,'#fff6d0',Math.round(atk.n*0.4));
+        shake=Math.max(shake,12+atk.ring*4);
+        for(let k=0;k<atk.ring;k++){
+          rings.push({x:bossPos().x,y:bossPos().y,r:6+k*14,max:110+k*45,life:28+k*7,
+                      color:k%2?atk.edge:atk.core});
         }
+        popup(bossPos().x,bossPos().y-84,atk.name,atk.edge,atk.ring>2?22:17);
+        sfx(atk.sound);
         rings.push({x:bossPos().x,y:bossPos().y,r:10,max:80,life:26,color:'#7cf5c4'});
         popup(bossPos().x,bossPos().y-46,'-'+dmg,'#ffd166',30);
         if(state.combo>1) popup(bossPos().x,bossPos().y-70,'COMBO x'+state.combo,'#ffd166',17);
@@ -1032,6 +1076,7 @@ function advance(){
         startLevel(true);
         arriveT = 1;
         shake = Math.max(shake, 16);
+        sfx('land');
         const bp = bossPos();
         burst(bp.x, bp.y+40, 'rgba(255,240,210,0.85)', 26);
         rings.push({x:bp.x,y:bp.y+50,r:10,max:150,life:26,color:'#ffe6b8'});
@@ -1164,6 +1209,7 @@ function queueProj(from,to,color,onArrive,timeoutMs){
   let fired = false;
   const fire = ()=>{ if(fired) return; fired = true; onArrive(); };
   const p = makeProj(from,to,color,fire);
+  p.trail = color;
   projectiles.push(p);
   setTimeout(()=>{
     if(fired) return;
@@ -1237,6 +1283,22 @@ let deathT = 0;      /* 0 -> 1 as the beaten monster comes apart      */
 let marchT = 0;      /* 0 -> 1 while the hero strides to the next one */
 let arriveT = 0;     /* 0 -> 1 as the next monster lands              */
 let deathBurst = false;
+
+/* Attacks escalate with the combo rather than always being the same
+   bolt: a clean run visibly hits harder than a first attempt. */
+const ATTACKS = [
+  { name:'SPARK',    core:'#ffd166', edge:'#ff8a3c', n:26, ring:1, sound:'hit'   },
+  { name:'FLAME',    core:'#ff9a3c', edge:'#ff5722', n:40, ring:2, sound:'flame' },
+  { name:'FIREBALL', core:'#ff7a1f', edge:'#ffd166', n:56, ring:3, sound:'flame' },
+  { name:'INFERNO',  core:'#fff3c8', edge:'#ff3d00', n:78, ring:4, sound:'blast' }
+];
+function attackFor(combo, stars){
+  let tier = 0;
+  if(stars>=2) tier++;
+  if(combo>=2) tier++;
+  if(combo>=4) tier++;
+  return ATTACKS[Math.min(ATTACKS.length-1, tier)];
+}
 function camX(){
   /* ease out, so the scene decelerates into the new arena */
   const p = 1 - travel;
@@ -1433,6 +1495,7 @@ function drawHero(t){
     ctx.translate(0,84);
     const squash = 1 + heroAnim.cast*0.06;
     ctx.scale(1/squash, squash);
+    ctx.scale(-1, 1);          // face right, towards the monster
     drawSprite(heroImg, 176);
     ctx.restore();
     ctx.globalAlpha = 1;
