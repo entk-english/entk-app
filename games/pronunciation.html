@@ -1003,7 +1003,6 @@ function advance(){
   /* A defeated monster ends this word's level rather than the round. */
   if(state.bossHP<=0){
     bossAnim.dead = 1;
-    sfx('win');
     state.cleared = (state.cleared||0) + 1;
     if(state.idx >= state.entries.length-1){
       state.running = false;
@@ -1012,18 +1011,32 @@ function advance(){
     }
     state.busy = true;
     setMarkingEnabled(false);
-    setStatus('<b>' + state.boss.name + '</b> defeated. Moving on…');
+    setStatus('<b>' + state.boss.name + '</b> defeated!');
+
+    /* beat one: the monster comes apart */
+    deathT = 1; deathBurst = false;
+    sfx('win');
+
     setTimeout(()=>{
-      /* start the journey, then arrive in the new arena part way
-         through it so the next monster fades in as the scene settles */
+      /* beat two: the hero marches out and the arena slides past */
+      setStatus('Marching on…');
+      marchT = 1;
       travel = 1; travelDir = 1;
+
       setTimeout(()=>{
+        /* beat three: the next monster lands */
         state.idx++;
         state.bossIdx++;
         state.busy = false;
+        deathT = 0;
         startLevel(true);
-      }, 420);
-    }, 900);
+        arriveT = 1;
+        shake = Math.max(shake, 16);
+        const bp = bossPos();
+        burst(bp.x, bp.y+40, 'rgba(255,240,210,0.85)', 26);
+        rings.push({x:bp.x,y:bp.y+50,r:10,max:150,life:26,color:'#ffe6b8'});
+      }, 900);
+    }, 1050);
     return;
   }
 
@@ -1220,6 +1233,10 @@ let shooting = null, shootTimer = 220;
    itself is on a timer, so a hidden tab never strands the round. */
 let travel = 0;
 let travelDir = 1;
+let deathT = 0;      /* 0 -> 1 as the beaten monster comes apart      */
+let marchT = 0;      /* 0 -> 1 while the hero strides to the next one */
+let arriveT = 0;     /* 0 -> 1 as the next monster lands              */
+let deathBurst = false;
 function camX(){
   /* ease out, so the scene decelerates into the new arena */
   const p = 1 - travel;
@@ -1400,11 +1417,16 @@ function drawHero(t){
 
   const heroImg = sprite('hero');
   if(heroImg){
-    /* a walk cycle while the arena slides by */
-    if(travel>0){
-      const step = Math.sin(t*16);
-      ctx.translate(0, -Math.abs(step)*7);
-      ctx.rotate(step*0.05);
+    /* A march rather than a bob: the hero leans into the walk, rises
+       and falls on each stride, and kicks up dust at every footfall. */
+    if(marchT>0 || travel>0){
+      const step = Math.sin(t*13);
+      ctx.translate(24*(1-Math.max(marchT,travel)), -Math.abs(step)*11);
+      ctx.rotate(step*0.07 + 0.05);
+      if(Math.abs(step) > 0.97 && Math.random() < 0.4){
+        const hp = heroPos();
+        burst(hp.x-18, hp.y+74, 'rgba(255,240,210,0.9)', 4);
+      }
     }
     if(heroAnim.hit>0.05){ ctx.globalAlpha = 0.55 + Math.random()*0.45; }
     ctx.save();
@@ -1619,8 +1641,31 @@ function drawBoss(t){
 
   const bossImg = b.art ? sprite(b.art) : null;
   if(bossImg){
-    /* drop into place as the arena settles */
-    if(travel>0){ ctx.globalAlpha *= Math.max(0, 1-travel*1.6); ctx.translate(0,-travel*40); }
+    /* Defeat: stagger, tip over, break apart. The particles are thrown
+       once rather than every frame, or the burst would never thin out. */
+    if(deathT>0){
+      const p = 1-deathT;
+      ctx.globalAlpha *= Math.max(0, 1-p*1.15);
+      ctx.rotate(p*0.9);
+      ctx.translate(Math.sin(deathT*40)*10*deathT, p*70);
+      ctx.scale(1+p*0.15, 1-p*0.35);
+      if(!deathBurst){
+        deathBurst = true;
+        const bp = bossPos();
+        burst(bp.x, bp.y-40, '#ffd166', 60);
+        burst(bp.x, bp.y-40, '#ff8a3c', 44);
+        burst(bp.x, bp.y-40, '#fff6d0', 30);
+        rings.push({x:bp.x,y:bp.y-30,r:8,max:190,life:40,color:'#ffd166'});
+        shake = Math.max(shake, 22);
+      }
+    }
+    /* Arrival: land hard, with a squash and a thump of dust. */
+    if(arriveT>0){
+      const a=arriveT;
+      ctx.translate(0, -a*a*220);
+      ctx.scale(1+a*0.12, 1-a*0.12);
+    }
+    if(travel>0){ ctx.globalAlpha *= Math.max(0, 1-travel*1.4); }
     if(bossAnim.hit>0.05) ctx.globalAlpha *= 0.5 + Math.random()*0.5;
     ctx.save();
     ctx.translate(0,104);
@@ -2063,6 +2108,9 @@ function drawHUD(){
    ============================================================ */
 function update(){
   if(travel>0) travel = Math.max(0, travel - 0.016);
+  if(deathT>0) deathT = Math.max(0, deathT - 0.022);
+  if(marchT>0) marchT = Math.max(0, marchT - 0.014);
+  if(arriveT>0) arriveT = Math.max(0, arriveT - 0.03);
 
   heroAnim.bob+=0.05; bossAnim.bob+=0.045;
   heroAnim.hit*=0.86; bossAnim.hit*=0.86;
