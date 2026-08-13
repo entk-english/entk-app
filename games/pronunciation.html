@@ -331,16 +331,16 @@ function analyzeWord(raw){
    BOSS ROSTER (from the character sheet)
    ============================================================ */
 const BOSSES = [
-  { name:'Word Wizard',       type:'wraith',  hue:265, hp:100 },
-  { name:'Tense Troll',       type:'troll',   hue:100, hp:115 },
-  { name:'Subject Specter',   type:'ghost',   hue:195, hp:105 },
-  { name:'Ending Eater',      type:'slime',   hue:95,  hp:120 },
-  { name:'Connector Count',   type:'vampire', hue:345, hp:125 },
-  { name:'Pronoun Patrol',    type:'robot',   hue:205, hp:120 },
-  { name:'Punctuation Beast', type:'dragon',  hue:15,  hp:140 },
-  { name:'Adjective Witch',   type:'witch',   hue:280, hp:130 },
-  { name:'Overlord',          type:'knight',  hue:220, hp:145 },
-  { name:'Infinitive Mimic',  type:'book',    hue:35,  hp:135 }
+  { name:'Word Wizard',       art:'boss-01-inkblot', type:'wraith',  hue:265, hp:100 },
+  { name:'Tense Troll',       art:'boss-02-dictionary', type:'troll',   hue:100, hp:115 },
+  { name:'Subject Specter',   art:'boss-03-tiles', type:'ghost',   hue:195, hp:105 },
+  { name:'Ending Eater',      art:'boss-04-typewriter', type:'slime',   hue:95,  hp:120 },
+  { name:'Connector Count',   art:'boss-05-scroll', type:'vampire', hue:345, hp:125 },
+  { name:'Pronoun Patrol',    art:'boss-06-quillbird', type:'robot',   hue:205, hp:120 },
+  { name:'Punctuation Beast', art:'boss-07-glue', type:'dragon',  hue:15,  hp:140 },
+  { name:'Adjective Witch',   art:'boss-01-inkblot', type:'witch',   hue:280, hp:130 },
+  { name:'Overlord',          art:'boss-02-dictionary', type:'knight',  hue:220, hp:145 },
+  { name:'Infinitive Mimic',  art:'boss-03-tiles', type:'book',    hue:35,  hp:135 }
 ];
 
 const PRESETS = [
@@ -1075,116 +1075,110 @@ const towers = (()=>{const a=[];let x=-30;while(x<W+30){const w=24+Math.random()
 const motes = Array.from({length:34},()=>({x:Math.random()*W,y:Math.random()*H,
   r:0.9+Math.random()*2.3,sp:0.12+Math.random()*0.4,drift:(Math.random()-0.5)*0.35,
   seed:Math.random()*10,hue:Math.random()<0.5?150:45}));
+/* ---- reading-room scene data, generated once ---- */
+const shelves = (()=>{
+  const tiers=[{y:40,h:78,alpha:0.42},{y:150,h:86,alpha:0.62},{y:262,h:92,alpha:0.85}];
+  return tiers.map(tier=>{
+    const books=[]; let x=-14;
+    while(x<W+14){
+      const w=13+Math.random()*22;
+      books.push({x, w, h:tier.h*(0.62+Math.random()*0.38),
+        hue:[22,14,32,8,40,200,150][Math.floor(Math.random()*7)],
+        l:22+Math.random()*16, lean:Math.random()<0.12?(Math.random()-0.5)*0.16:0});
+      x+=w+2+Math.random()*3;
+    }
+    return {y:tier.y,h:tier.h,alpha:tier.alpha,books};
+  });
+})();
+const grain = Array.from({length:16},()=>({y:392+Math.random()*200,
+  a:6+Math.random()*22, b:(Math.random()-0.5)*26}));
+const dust = Array.from({length:40},()=>({x:Math.random()*W, y:Math.random()*380,
+  r:0.7+Math.random()*1.8, s:0.3+Math.random()*0.7, p:Math.random()*7}));
 let shooting = null, shootTimer = 220;
 
 function drawBackground(t){
-  const sky=ctx.createLinearGradient(0,0,0,H);
-  sky.addColorStop(0,'#07031a'); sky.addColorStop(0.42,'#180f3e');
-  sky.addColorStop(0.72,'#2a1a54'); sky.addColorStop(1,'#120a2c');
-  ctx.fillStyle=sky; ctx.fillRect(-30,-30,W+60,H+60);
+  /* A reading room rather than a night arena: warm paper light, a wall
+     of books behind, and a desk surface the characters stand on. Canvas
+     is good at wood, paper and bevels — far better than at faces — so
+     the art leans on what the medium actually does well. */
+  const wall=ctx.createLinearGradient(0,0,0,H);
+  wall.addColorStop(0,'#3a2415');
+  wall.addColorStop(0.52,'#5a3a22');
+  wall.addColorStop(1,'#2a1a0f');
+  ctx.fillStyle=wall; ctx.fillRect(0,0,W,H);
 
-  // nebula
-  for(let i=0;i<3;i++){
-    const cx=180+i*300+Math.sin(t*0.12+i)*30, cy=90+i*22;
-    const g=ctx.createRadialGradient(cx,cy,10,cx,cy,150);
-    const hue=[280,200,320][i];
-    g.addColorStop(0,'hsla('+hue+',70%,60%,0.14)');
-    g.addColorStop(1,'hsla('+hue+',70%,60%,0)');
-    ctx.fillStyle=g; ctx.fillRect(cx-160,cy-160,320,320);
-  }
+  /* hanging lamp glow, top centre */
+  const lamp=ctx.createRadialGradient(W/2,-40,20,W/2,-40,460);
+  lamp.addColorStop(0,'rgba(255,214,140,0.55)');
+  lamp.addColorStop(1,'rgba(255,214,140,0)');
+  ctx.fillStyle=lamp; ctx.fillRect(0,0,W,H);
 
-  // stars
-  for(const s of stars){
-    ctx.globalAlpha=(0.35+0.65*Math.abs(Math.sin(t*0.6+s.seed)))*0.9;
-    ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
-  }
-  ctx.globalAlpha=1;
+  /* bookshelves: three tiers of spines receding into shadow */
+  shelves.forEach(shelf=>{
+    ctx.save();
+    ctx.globalAlpha=shelf.alpha;
+    /* shelf plank */
+    ctx.fillStyle='#2e1c10';
+    ctx.fillRect(0,shelf.y+shelf.h,W,9);
+    ctx.fillStyle='rgba(255,214,140,0.10)';
+    ctx.fillRect(0,shelf.y+shelf.h,W,2);
+    shelf.books.forEach(b=>{
+      const lean=b.lean;
+      ctx.save();
+      ctx.translate(b.x,shelf.y+shelf.h);
+      ctx.rotate(lean);
+      const g=ctx.createLinearGradient(0,-b.h,b.w,-b.h);
+      g.addColorStop(0,'hsl('+b.hue+',34%,'+(b.l+9)+'%)');
+      g.addColorStop(0.5,'hsl('+b.hue+',38%,'+b.l+'%)');
+      g.addColorStop(1,'hsl('+b.hue+',34%,'+(b.l-10)+'%)');
+      ctx.fillStyle=g;
+      ctx.fillRect(0,-b.h,b.w,b.h);
+      /* gold bands on the spine */
+      ctx.fillStyle='rgba(233,195,116,0.5)';
+      ctx.fillRect(0,-b.h+b.h*0.18,b.w,1.6);
+      ctx.fillRect(0,-b.h+b.h*0.72,b.w,1.6);
+      ctx.restore();
+    });
+    ctx.restore();
+  });
 
-  // shooting star
-  if(--shootTimer<0 && !shooting){ shooting={x:Math.random()*W*0.6,y:30+Math.random()*90,t:0}; shootTimer=260+Math.random()*400; }
-  if(shooting){
-    shooting.t+=0.028;
-    const sx=shooting.x+shooting.t*420, sy=shooting.y+shooting.t*150;
-    const g=ctx.createLinearGradient(sx-70,sy-25,sx,sy);
-    g.addColorStop(0,'rgba(255,255,255,0)'); g.addColorStop(1,'rgba(255,255,255,0.85)');
-    ctx.strokeStyle=g; ctx.lineWidth=2; ctx.beginPath();
-    ctx.moveTo(sx-70,sy-25); ctx.lineTo(sx,sy); ctx.stroke();
-    if(shooting.t>1) shooting=null;
-  }
+  /* desk surface */
+  const deskY=384;
+  const desk=ctx.createLinearGradient(0,deskY,0,H);
+  desk.addColorStop(0,'#8a5a30');
+  desk.addColorStop(0.12,'#7a4d28');
+  desk.addColorStop(1,'#4a2c15');
+  ctx.fillStyle=desk; ctx.fillRect(0,deskY,W,H-deskY);
 
-  // moon
-  const mx=W-140,my=88;
-  const mg=ctx.createRadialGradient(mx,my,12,mx,my,110);
-  mg.addColorStop(0,'rgba(200,220,255,0.30)'); mg.addColorStop(1,'rgba(200,220,255,0)');
-  ctx.fillStyle=mg; ctx.beginPath(); ctx.arc(mx,my,110,0,Math.PI*2); ctx.fill();
-  const mb=ctx.createRadialGradient(mx-13,my-13,4,mx,my,34);
-  mb.addColorStop(0,'#fffaf0'); mb.addColorStop(1,'#c6bfe0');
-  ctx.fillStyle=mb; ctx.beginPath(); ctx.arc(mx,my,32,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='rgba(150,140,180,0.35)';
-  ctx.beginPath(); ctx.arc(mx-9,my-6,6,0,Math.PI*2); ctx.arc(mx+8,my+7,4.5,0,Math.PI*2);
-  ctx.arc(mx+4,my-12,3,0,Math.PI*2); ctx.fill();
+  /* front edge highlight */
+  ctx.fillStyle='rgba(255,214,140,0.22)';
+  ctx.fillRect(0,deskY,W,3);
 
-  // far hills
-  ctx.fillStyle='rgba(30,18,64,0.85)';
-  for(const h of farHills){
-    ctx.beginPath(); ctx.moveTo(h.x,268);
-    ctx.quadraticCurveTo(h.x+h.w/2,268-h.h,h.x+h.w,268);
-    ctx.closePath(); ctx.fill();
-  }
-
-  // skyline
-  ctx.fillStyle='rgba(9,4,26,0.92)';
-  for(const b of towers){
-    ctx.beginPath();
-    ctx.moveTo(b.x,272); ctx.lineTo(b.x,272-b.h);
-    ctx.lineTo(b.x+b.w/2,272-b.h-b.roof); ctx.lineTo(b.x+b.w,272-b.h);
-    ctx.lineTo(b.x+b.w,272); ctx.closePath(); ctx.fill();
-  }
-  for(const b of towers){
-    if(!b.lit||b.h<80) continue;
-    const fl=0.45+0.55*Math.abs(Math.sin(t*1.2+b.x));
-    ctx.globalAlpha=fl*0.75; ctx.fillStyle='#ffd166';
-    ctx.fillRect(b.x+b.w*0.5-2,272-b.h*0.55-3,4,7);
-    ctx.globalAlpha=1;
-  }
-
-  // horizon haze
-  const hz=ctx.createLinearGradient(0,236,0,290);
-  hz.addColorStop(0,'rgba(124,245,196,0)'); hz.addColorStop(1,'rgba(124,245,196,0.16)');
-  ctx.fillStyle=hz; ctx.fillRect(-30,236,W+60,58);
-
-  // arena platform
+  /* wood grain */
   ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(W*0.5-520,H+30); ctx.lineTo(W*0.5+520,H+30);
-  ctx.lineTo(W*0.5+165,276); ctx.lineTo(W*0.5-165,276);
-  ctx.closePath(); ctx.clip();
-  const fg=ctx.createLinearGradient(0,276,0,H+30);
-  fg.addColorStop(0,'#2b1f52'); fg.addColorStop(1,'#0d0722');
-  ctx.fillStyle=fg; ctx.fillRect(-30,260,W+60,H);
-  for(let i=-7;i<=7;i++){
-    ctx.beginPath(); ctx.moveTo(W*0.5+i*28,276); ctx.lineTo(W*0.5+i*165,H+30);
-    ctx.strokeStyle='rgba(180,150,255,0.10)'; ctx.lineWidth=1; ctx.stroke();
-  }
-  for(let j=0;j<7;j++){
-    const y=276+j*j*7+j*16;
-    ctx.beginPath(); ctx.moveTo(W*0.5-170-j*46,y); ctx.lineTo(W*0.5+170+j*46,y);
-    ctx.strokeStyle='rgba(180,150,255,'+Math.max(0,0.11-j*0.013)+')'; ctx.stroke();
-  }
+  ctx.globalAlpha=0.16;
+  ctx.strokeStyle='#311c0c'; ctx.lineWidth=1.4;
+  grain.forEach(g=>{
+    ctx.beginPath();
+    ctx.moveTo(-20,g.y);
+    ctx.bezierCurveTo(W*0.3,g.y+g.a,W*0.7,g.y-g.a,W+20,g.y+g.b);
+    ctx.stroke();
+  });
   ctx.restore();
 
-  runeCircle(heroPos().x, heroPos().y+70, 66, '#7cf5c4', t);
-  runeCircle(bossPos().x, bossPos().y+102, 84, 'hsl('+state.boss.hue+',80%,62%)', -t);
+  /* warm pool of light on the desk between the two characters */
+  const pool=ctx.createRadialGradient(W/2,deskY+90,30,W/2,deskY+90,430);
+  pool.addColorStop(0,'rgba(255,222,160,0.20)');
+  pool.addColorStop(1,'rgba(255,222,160,0)');
+  ctx.fillStyle=pool; ctx.fillRect(0,deskY,W,H-deskY);
 
-  for(const m of motes){
-    m.y-=m.sp; m.x+=Math.sin(t+m.seed)*m.drift;
-    if(m.y<70){ m.y=H-10; m.x=Math.random()*W; }
-    ctx.globalAlpha=(0.35+0.65*Math.abs(Math.sin(t*1.5+m.seed)))*0.6;
-    ctx.beginPath(); ctx.arc(m.x,m.y,m.r,0,Math.PI*2);
-    ctx.fillStyle='hsl('+m.hue+',90%,76%)';
-    ctx.shadowColor=ctx.fillStyle; ctx.shadowBlur=7; ctx.fill(); ctx.shadowBlur=0;
-  }
+  /* dust in the lamplight */
+  dust.forEach(m=>{
+    const yy=m.y+Math.sin(t*m.s+m.p)*14;
+    ctx.globalAlpha=0.10+Math.sin(t*m.s*1.4+m.p)*0.07;
+    ctx.beginPath(); ctx.arc(m.x,yy,m.r,0,Math.PI*2);
+    ctx.fillStyle='#ffe6b8'; ctx.fill();
+  });
   ctx.globalAlpha=1;
 }
 
@@ -1215,6 +1209,30 @@ function vignette(){
 /* ============================================================
    HERO — the Sentence Seeker
    ============================================================ */
+/* ============================================================
+   SPRITE ART
+   Characters are generated artwork rather than canvas paths. The
+   procedural versions are kept below as a fallback so the game still
+   runs if an image is missing or has not loaded yet.
+   ============================================================ */
+const SPR = {};
+['hero','boss-01-inkblot','boss-02-dictionary','boss-03-tiles','boss-04-typewriter',
+ 'boss-05-scroll','boss-06-quillbird','boss-07-glue'].forEach(n=>{
+  const img = new Image();
+  img.src = 'sprites/' + n + '.png';
+  SPR[n] = img;
+});
+function sprite(name){
+  const img = SPR[name];
+  return (img && img.complete && img.naturalWidth) ? img : null;
+}
+/* drawn at a fixed height so wildly different source crops still sit
+   consistently on the desk */
+function drawSprite(img, h){
+  const w = img.naturalWidth / img.naturalHeight * h;
+  ctx.drawImage(img, -w/2, -h, w, h);
+}
+
 function drawHero(t){
   const p=heroPos(), bob=Math.sin(heroAnim.bob)*4.5, lunge=heroAnim.cast*26;
   ctx.save();
@@ -1223,6 +1241,20 @@ function drawHero(t){
 
   ctx.beginPath(); ctx.ellipse(0,80,46,11,0,0,Math.PI*2);
   ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fill();
+
+  const heroImg = sprite('hero');
+  if(heroImg){
+    if(heroAnim.hit>0.05){ ctx.globalAlpha = 0.55 + Math.random()*0.45; }
+    ctx.save();
+    ctx.translate(0,84);
+    const squash = 1 + heroAnim.cast*0.06;
+    ctx.scale(1/squash, squash);
+    drawSprite(heroImg, 176);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    return;
+  }
 
   // owl familiar
   ctx.save();
@@ -1422,6 +1454,19 @@ function drawBoss(t){
 
   ctx.beginPath(); ctx.ellipse(0,100,68,15,0,0,Math.PI*2);
   ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fill();
+
+  const bossImg = b.art ? sprite(b.art) : null;
+  if(bossImg){
+    if(bossAnim.hit>0.05) ctx.globalAlpha *= 0.5 + Math.random()*0.5;
+    ctx.save();
+    ctx.translate(0,104);
+    const breathe = 1 + Math.sin(t*1.6)*0.02;
+    ctx.scale(1/breathe, breathe);
+    drawSprite(bossImg, 208);
+    ctx.restore();
+    ctx.restore();
+    return;
+  }
 
   switch(b.type){
     case 'wraith': {
@@ -1733,59 +1778,102 @@ function hpBar(x,y,w,h,pct,cols,label){
   ctx.restore();
 }
 
+/* One chunky letter tile, in the manner of a wooden word game piece:
+   bevelled face, warm ivory, deep serif letter, and a shadow that
+   makes it sit on the desk rather than float above it. */
+function drawTile(x,y,size,ch,opts){
+  const o=opts||{};
+  const r=size*0.16;
+  ctx.save();
+  ctx.translate(x,y);
+  if(o.rot) ctx.rotate(o.rot);
+
+  ctx.beginPath(); ctx.roundRect(-size/2+2,-size/2+5,size,size,r);
+  ctx.fillStyle='rgba(40,20,8,0.38)'; ctx.fill();
+
+  ctx.beginPath(); ctx.roundRect(-size/2,-size/2,size,size,r);
+  const face=ctx.createLinearGradient(-size/2,-size/2,size/2,size/2);
+  if(o.hot){ face.addColorStop(0,'#fff3c8'); face.addColorStop(1,'#f2c86a'); }
+  else { face.addColorStop(0,'#fdf6e3'); face.addColorStop(1,'#e8d5ab'); }
+  ctx.fillStyle=face; ctx.fill();
+
+  ctx.strokeStyle=o.hot?'#b9822c':'#c2a778'; ctx.lineWidth=2; ctx.stroke();
+
+  ctx.beginPath();
+  ctx.roundRect(-size/2+4,-size/2+4,size-8,size*0.34,r*0.7);
+  ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fill();
+
+  ctx.fillStyle=o.hot?'#5a3208':'#4a3316';
+  ctx.font='800 '+Math.round(size*0.58)+'px Georgia, "Segoe UI", serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(ch.toUpperCase(),0,size*0.04);
+  ctx.restore();
+}
+
 function drawWordCard(t){
   const e = current();
-  const cx=W/2, cy=482;
+  const cx=W/2, cy=486;
   ctx.save();
-  ctx.beginPath(); ctx.roundRect(cx-320,cy-56,640,112,18);
-  ctx.fillStyle='rgba(14,7,32,0.72)'; ctx.fill();
-  ctx.strokeStyle='rgba(124,92,200,0.5)'; ctx.lineWidth=2; ctx.stroke();
 
+  const word=String(e.word||'');
+  const letters=word.split('');
+  const maxW=W-140;
+  let size=Math.min(60, Math.floor(maxW/Math.max(1,letters.length))-8);
+  size=Math.max(26,size);
+  const gap=Math.round(size*0.16);
+  const total=letters.length*size+(letters.length-1)*gap;
+
+  /* label above the tiles */
   ctx.textAlign='center';
-  ctx.font='600 11px Segoe UI'; ctx.fillStyle= e.isVocab? '#ffd166':'#a996d6';
-  ctx.fillText((e.isVocab?'VOCABULARY · ':'')+e.rule.name.toUpperCase(), cx, cy-36);
+  ctx.font='700 12px Segoe UI';
+  ctx.fillStyle= e.isVocab? '#ffd166':'rgba(255,232,190,0.75)';
+  ctx.fillText((e.isVocab?'VOCABULARY · ':'')+e.rule.name.toUpperCase(), cx, cy-size*0.72-16);
 
-  const pulse = listening? 1+Math.sin(t*7)*0.03 : 1;
-  ctx.save(); ctx.translate(cx,cy-6); ctx.scale(pulse,pulse);
-  ctx.font='700 44px Segoe UI'; ctx.textBaseline='middle';
-  ctx.fillStyle= listening? '#ffe9a8':'#f3eeff';
-  ctx.shadowColor= listening? '#ffd166':'#7cf5c4'; ctx.shadowBlur=26;
-  ctx.fillText(e.word,0,0); ctx.shadowBlur=0; ctx.restore();
+  /* the word itself, as tiles on the desk */
+  const pulse = listening? Math.sin(t*7) : 0;
+  let x=cx-total/2+size/2;
+  letters.forEach((ch,i)=>{
+    const lift = listening? Math.sin(t*6-i*0.5)*3 : 0;
+    drawTile(x, cy+lift, size, ch, {
+      hot: listening,
+      rot: (((i*37)%7)-3)*0.006
+    });
+    x+=size+gap;
+  });
 
-  // meaning line for vocabulary, respelling/tip for drill words
+  /* respelling or tip, below the tiles */
+  const belowY=cy+size*0.62+24;
   if(e.isVocab && e.meaning){
-    ctx.font='italic 500 13px Segoe UI'; ctx.fillStyle='#c9b8f0';
+    ctx.font='italic 500 14px Georgia, serif'; ctx.fillStyle='rgba(255,236,200,0.86)';
     const mm = e.meaning.length>72 ? e.meaning.slice(0,70)+'…' : e.meaning;
-    ctx.fillText(mm, cx, cy+20);
+    ctx.fillText(mm, cx, belowY);
     if(e.respell){
-      ctx.font='600 13px Segoe UI'; ctx.fillStyle='#7cf5c4';
-      ctx.fillText('say it like:  '+e.respell, cx, cy+38);
+      ctx.font='700 14px Segoe UI'; ctx.fillStyle='#ffd166';
+      ctx.fillText('say it like:  '+e.respell, cx, belowY+20);
     }
   }else if(e.respell){
-    ctx.font='600 15px Segoe UI'; ctx.fillStyle='#7cf5c4';
-    ctx.fillText('say it like:  '+e.respell, cx, cy+28);
+    ctx.font='700 16px Segoe UI'; ctx.fillStyle='#ffd166';
+    ctx.fillText('say it like:  '+e.respell, cx, belowY);
   }else{
-    ctx.font='500 12.5px Segoe UI'; ctx.fillStyle='#9d8dc4';
-    const tip = e.rule.tip.length>76 ? e.rule.tip.slice(0,74)+'…' : e.rule.tip;
-    ctx.fillText(tip, cx, cy+28);
+    ctx.font='500 13px Segoe UI'; ctx.fillStyle='rgba(255,232,190,0.66)';
+    const tip = e.rule.tip.length>80 ? e.rule.tip.slice(0,78)+'…' : e.rule.tip;
+    ctx.fillText(tip, cx, belowY);
   }
 
-  // attempt dots — shows how many tries are left on THIS word
-  const ax=cx+250;
+  /* attempt dots */
+  const ax=cx+total/2+22;
   for(let i=0;i<MAX_ATTEMPTS;i++){
-    ctx.beginPath(); ctx.arc(ax+i*13, cy-36, 4, 0, Math.PI*2);
-    ctx.fillStyle = i<state.attempt ? '#ff5d73' : 'rgba(255,255,255,0.28)';
+    ctx.beginPath(); ctx.arc(ax, cy-size*0.4+i*13, 4, 0, Math.PI*2);
+    ctx.fillStyle = i<state.attempt ? '#e05a4a' : 'rgba(255,232,190,0.3)';
     ctx.fill();
   }
 
-  // progress pips
-  const n=state.entries.length, sp=Math.min(26,560/Math.max(1,n));
-  const sx=cx-(n-1)*sp/2;
-  for(let i=0;i<n;i++){
-    const done = state.results[i];
-    ctx.beginPath(); ctx.arc(sx+i*sp, cy+52, 5, 0, Math.PI*2);
-    ctx.fillStyle = done ? (done.stars>=2?'#7cf5c4':done.stars===1?'#ffa94d':'#ff5d73')
-                  : (i===state.idx?'#ffd166':'rgba(255,255,255,0.22)');
+  /* progress pips along the bottom */
+  const n=state.entries.length, pw=Math.min(9,n);
+  for(let i=0;i<pw;i++){
+    const px=cx-(pw-1)*7+i*14;
+    ctx.beginPath(); ctx.arc(px, cy+size*0.62+46, 3.4, 0, Math.PI*2);
+    ctx.fillStyle = i<state.idx ? '#8ac48a' : i===state.idx ? '#ffd166' : 'rgba(255,232,190,0.26)';
     ctx.fill();
   }
   ctx.restore();
