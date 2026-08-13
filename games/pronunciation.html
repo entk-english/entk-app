@@ -478,6 +478,10 @@ function buildRound(words, vocab){
   bossAnim.dead = 0;
   lastBlob = null;
   const pb=document.getElementById('playbackBtn'); if(pb) pb.disabled = true;
+  preloadIPA(state.entries);
+  state.cleared = 0;
+  state.levelBanner = 0;
+  if(state.entries.length) startLevel(false);
 }
 
 function parseWords(raw){
@@ -763,6 +767,47 @@ micBtn.onclick = async ()=>{
   try{ recognition.start(); }catch(e){ stopListening(); }
 };
 
+/* ------------------------------------------------------------
+   PRONUNCIATION DICTIONARY
+   Every word the trainer types gets a phonetic line under it. The
+   lookup is free and keyless but returns British first for many
+   words, so American variants are preferred: they carry the rhotic
+   r. Results are cached, and the rule-based respelling already in
+   the game remains the fallback when the lookup fails.
+   ------------------------------------------------------------ */
+const ipaCache = {};
+
+function pickAmerican(entry){
+  const list = (entry.phonetics||[]).map(p=>p.text).filter(Boolean);
+  if(!list.length) return entry.phonetic || '';
+  const rhotic = list.find(p=>/ɹ|ɚ|ɝ/.test(p));
+  if(rhotic) return rhotic;
+  const aVowel = list.find(p=>/ɑ|æ/.test(p));
+  return aVowel || list[0];
+}
+
+async function lookupIPA(word){
+  const key = String(word||'').toLowerCase().trim();
+  if(!key) return '';
+  if(key in ipaCache) return ipaCache[key];
+  ipaCache[key] = '';
+  try{
+    const res = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(key));
+    if(res.ok){
+      const j = await res.json();
+      if(Array.isArray(j) && j[0]) ipaCache[key] = pickAmerican(j[0]);
+    }
+  }catch(e){ /* offline or rate limited — the respelling still shows */ }
+  return ipaCache[key];
+}
+
+/* fetch for the whole round up front so nothing stalls mid-battle */
+function preloadIPA(entries){
+  (entries||[]).forEach(en=>{
+    lookupIPA(en.word).then(ipa=>{ if(ipa) en.ipa = ipa; });
+  });
+}
+
 function current(){ return state.entries[state.idx] || {word:'',rule:DEFAULT_RULE}; }
 
 function norm(s){ return String(s).toLowerCase().replace(/[^a-z]/g,''); }
@@ -840,6 +885,16 @@ function markManually(good){
   applyResult(good ? 96 : 30, state.lastHeard || '', current(), true);
 }
 
+/* The trainee may open the shared link on their own device; the
+   verdict belongs to the trainer, so the controls appear only when the
+   game is embedded in the session app the trainer is running. */
+(function trainerOnlyMarking(){
+  if(window.parent === window){
+    const row=document.getElementById('markRow');
+    if(row) row.style.display='none';
+  }
+})();
+
 (function wireMarking(){
   const g = document.getElementById('markGood'), b = document.getElementById('markBad');
   if(g) g.onclick = ()=>markManually(true);
@@ -873,7 +928,7 @@ function applyResult(pct, heard, entry, manual){
     state.combo++;
     state.bestCombo = Math.max(state.bestCombo, state.combo);
     state.score += pct + state.combo*5;
-    const dmg = Math.round((stars===3?26:stars===2?18:11) + state.combo*1.5);
+    const dmg = Math.round(state.bossMax * (stars===3?0.55:stars===2?0.42:0.3) + state.combo*2);
     heroAnim.cast = 1;
     setStatus(manual ? '✓ Marked good — nice one.'
             : stars===3? '⭐⭐⭐ Perfect — '+pct+'%'
@@ -881,12 +936,19 @@ function applyResult(pct, heard, entry, manual){
             : '⭐ Close — '+pct+'%. '+entry.rule.tip);
     sfx('hit');
     setTimeout(()=>{
-      queueProj(heroPos(), bossPos(), '#7cf5c4', ()=>{
+      queueProj(heroPos(), bossPos(), '#ff9a3c', ()=>{
         state.bossHP = Math.max(0, state.bossHP-dmg);
-        bossAnim.hit=1; shake=9;
-        burst(bossPos().x,bossPos().y,'#7cf5c4',26);
+        bossAnim.hit=1; shake=15;
+        burst(bossPos().x,bossPos().y,'#ffd166',46);
+        burst(bossPos().x,bossPos().y,'#ff8a3c',34);
+        burst(bossPos().x,bossPos().y,'#fff6d0',22);
+        shake=Math.max(shake,17);
+        for(let k=0;k<3;k++){
+          rings.push({x:bossPos().x,y:bossPos().y,r:6+k*14,max:120+k*40,life:30+k*6,
+                      color:k===1?'#ff8a3c':'#ffd166'});
+        }
         rings.push({x:bossPos().x,y:bossPos().y,r:10,max:80,life:26,color:'#7cf5c4'});
-        popup(bossPos().x,bossPos().y-46,'-'+dmg,'#7cf5c4',22);
+        popup(bossPos().x,bossPos().y-46,'-'+dmg,'#ffd166',30);
         if(state.combo>1) popup(bossPos().x,bossPos().y-70,'COMBO x'+state.combo,'#ffd166',17);
         advance();
       });
@@ -900,9 +962,9 @@ function applyResult(pct, heard, entry, manual){
     sfx('miss');
     setTimeout(()=>{
       queueProj(bossPos(), heroPos(), '#ff5d73', ()=>{
-        state.heroHP = Math.max(0, state.heroHP-14);
+        state.heroHP = Math.max(0, state.heroHP-7);
         heroAnim.hit=1; shake=11;
-        burst(heroPos().x,heroPos().y,'#ff5d73',24);
+        burst(heroPos().x,heroPos().y,'#ff5d73',34); shake=Math.max(shake,12);
         popup(heroPos().x,heroPos().y-46,'-14','#ff5d73',20);
         advance();
       });
@@ -910,26 +972,58 @@ function applyResult(pct, heard, entry, manual){
   }
 }
 
-function advance(){
-  state.busy = false;
-  if(state.bossHP<=0){ bossAnim.dead=1; state.running=false; sfx('win');
-    setTimeout(()=>showResults(true), 900); return; }
-  if(state.heroHP<=0){ state.running=false;
-    setTimeout(()=>showResults(false), 700); return; }
-  state.idx++;
-  state.attempt = 0; state.bestPct = 0; state.lastHeard='';   // fresh tries on the next word
+/* Set up the level for whatever word state.idx now points at: a new
+   monster, full health, a fresh arena and a banner. */
+function startLevel(announce){
+  state.attempt = 0; state.bestPct = 0; state.lastHeard = '';
+  state.boss = BOSSES[state.bossIdx % BOSSES.length];
+  state.bossHP = state.bossMax = state.boss.hp;
+  state.bossShown = state.bossHP;
+  bossAnim.dead = 0; bossAnim.hit = 0; bossAnim.lunge = 0;
+  projectiles = []; particles = []; rings = [];
+  state.levelBanner = announce ? 1 : 0;
   micBtn.classList.remove('retry');
-  if(state.idx >= state.entries.length){
-    state.running=false;
-    const won = state.bossHP < state.bossMax*0.5;
-    if(won) sfx('win');
-    setTimeout(()=>showResults(won), 700);
-    return;
-  }
-  document.getElementById('playbackBtn').disabled = true;
+  const pb = document.getElementById('playbackBtn'); if(pb) pb.disabled = true;
   lastBlob = null;
   setMarkingEnabled(true);
-  setStatus('Say <b>'+current().word+'</b> — then mark it.');
+  setStatus('Level ' + (state.idx+1) + ' of ' + state.entries.length +
+            ' — <b>' + state.boss.name + '</b>. Say <b>' + current().word + '</b>.');
+}
+
+function advance(){
+  state.busy = false;
+
+  if(state.heroHP<=0){ state.running=false;
+    setTimeout(()=>showResults(false), 700); return; }
+
+  /* A defeated monster ends this word's level rather than the round. */
+  if(state.bossHP<=0){
+    bossAnim.dead = 1;
+    sfx('win');
+    state.cleared = (state.cleared||0) + 1;
+    if(state.idx >= state.entries.length-1){
+      state.running = false;
+      setTimeout(()=>showResults(true), 950);
+      return;
+    }
+    state.busy = true;
+    setMarkingEnabled(false);
+    setTimeout(()=>{
+      state.idx++;
+      state.bossIdx++;
+      state.busy = false;
+      startLevel(true);
+    }, 1000);
+    return;
+  }
+
+  /* Monster still standing: same word, same level, go again. */
+  state.attempt = 0; state.bestPct = 0; state.lastHeard='';
+  micBtn.classList.remove('retry');
+  const pb = document.getElementById('playbackBtn'); if(pb) pb.disabled = true;
+  lastBlob = null;
+  setMarkingEnabled(true);
+  setStatus('Say <b>'+current().word+'</b> again — ' + Math.max(1,Math.round(state.bossHP)) + ' left on ' + state.boss.name + '.');
 }
 
 /* reference pronunciation + self playback */
@@ -1076,6 +1170,21 @@ const motes = Array.from({length:34},()=>({x:Math.random()*W,y:Math.random()*H,
   r:0.9+Math.random()*2.3,sp:0.12+Math.random()*0.4,drift:(Math.random()-0.5)*0.35,
   seed:Math.random()*10,hue:Math.random()<0.5?150:45}));
 /* ---- reading-room scene data, generated once ---- */
+/* Each monster gets its own atmosphere. The room's structure is
+   reused — shelf band, ground plane, light pool — but repainted, which
+   gives four distinct places for the cost of a palette. */
+const SCENES = [
+  { id:'library', wall:['#3a2415','#5a3a22','#2a1a0f'], ground:['#8a5a30','#7a4d28','#4a2c15'],
+    light:'255,214,140', band:'shelf' },
+  { id:'forest',  wall:['#0f2417','#1c4429','#08170e'], ground:['#3f5a2a','#354d22','#1d2c12'],
+    light:'190,255,170', band:'trees' },
+  { id:'desert',  wall:['#4a3312','#8a6524','#2e2009'], ground:['#c9a05a','#b88b45','#6d4f22'],
+    light:'255,226,150', band:'dunes' },
+  { id:'sky',     wall:['#10243f','#27466f','#0a1526'], ground:['#3d5f86','#33506f','#1a2b40'],
+    light:'180,215,255', band:'clouds' }
+];
+function scene(){ return SCENES[(state.bossIdx||0) % SCENES.length]; }
+
 const shelves = (()=>{
   const tiers=[{y:40,h:78,alpha:0.42},{y:150,h:86,alpha:0.62},{y:262,h:92,alpha:0.85}];
   return tiers.map(tier=>{
@@ -1101,20 +1210,45 @@ function drawBackground(t){
      of books behind, and a desk surface the characters stand on. Canvas
      is good at wood, paper and bevels — far better than at faces — so
      the art leans on what the medium actually does well. */
+  const SC=scene();
   const wall=ctx.createLinearGradient(0,0,0,H);
-  wall.addColorStop(0,'#3a2415');
-  wall.addColorStop(0.52,'#5a3a22');
-  wall.addColorStop(1,'#2a1a0f');
+  wall.addColorStop(0,SC.wall[0]);
+  wall.addColorStop(0.52,SC.wall[1]);
+  wall.addColorStop(1,SC.wall[2]);
   ctx.fillStyle=wall; ctx.fillRect(0,0,W,H);
 
   /* hanging lamp glow, top centre */
   const lamp=ctx.createRadialGradient(W/2,-40,20,W/2,-40,460);
-  lamp.addColorStop(0,'rgba(255,214,140,0.55)');
-  lamp.addColorStop(1,'rgba(255,214,140,0)');
+  lamp.addColorStop(0,'rgba('+SC.light+',0.55)');
+  lamp.addColorStop(1,'rgba('+SC.light+',0)');
   ctx.fillStyle=lamp; ctx.fillRect(0,0,W,H);
 
   /* bookshelves: three tiers of spines receding into shadow */
-  shelves.forEach(shelf=>{
+  if(SC.band!=='shelf'){
+    shelves.forEach((shelf,ti)=>{
+      ctx.save(); ctx.globalAlpha=shelf.alpha*0.85;
+      shelf.books.forEach(b=>{
+        const bx=b.x, base=shelf.y+shelf.h, hh=b.h;
+        ctx.beginPath();
+        if(SC.band==='trees'){
+          ctx.moveTo(bx-b.w*0.9, base);
+          ctx.lineTo(bx, base-hh*1.5);
+          ctx.lineTo(bx+b.w*0.9, base);
+        }else if(SC.band==='dunes'){
+          ctx.moveTo(bx-b.w*1.4, base);
+          ctx.quadraticCurveTo(bx, base-hh*0.55, bx+b.w*1.4, base);
+        }else{
+          ctx.arc(bx, base-hh*0.35, b.w*0.9, 0, Math.PI*2);
+        }
+        ctx.closePath();
+        ctx.fillStyle = SC.band==='clouds'
+          ? 'rgba(255,255,255,0.13)'
+          : 'hsl('+(SC.band==='trees'?120:36)+',30%,'+(10+ti*5)+'%)';
+        ctx.fill();
+      });
+      ctx.restore();
+    });
+  } else shelves.forEach(shelf=>{
     ctx.save();
     ctx.globalAlpha=shelf.alpha;
     /* shelf plank */
@@ -1145,9 +1279,9 @@ function drawBackground(t){
   /* desk surface */
   const deskY=384;
   const desk=ctx.createLinearGradient(0,deskY,0,H);
-  desk.addColorStop(0,'#8a5a30');
-  desk.addColorStop(0.12,'#7a4d28');
-  desk.addColorStop(1,'#4a2c15');
+  desk.addColorStop(0,SC.ground[0]);
+  desk.addColorStop(0.12,SC.ground[1]);
+  desk.addColorStop(1,SC.ground[2]);
   ctx.fillStyle=desk; ctx.fillRect(0,deskY,W,H-deskY);
 
   /* front edge highlight */
@@ -1168,8 +1302,8 @@ function drawBackground(t){
 
   /* warm pool of light on the desk between the two characters */
   const pool=ctx.createRadialGradient(W/2,deskY+90,30,W/2,deskY+90,430);
-  pool.addColorStop(0,'rgba(255,222,160,0.20)');
-  pool.addColorStop(1,'rgba(255,222,160,0)');
+  pool.addColorStop(0,'rgba('+SC.light+',0.20)');
+  pool.addColorStop(1,'rgba('+SC.light+',0)');
   ctx.fillStyle=pool; ctx.fillRect(0,deskY,W,H-deskY);
 
   /* dust in the lamplight */
@@ -1816,33 +1950,35 @@ function drawWordCard(t){
   ctx.save();
 
   const word=String(e.word||'');
-  const letters=word.split('');
-  const maxW=W-140;
-  let size=Math.min(60, Math.floor(maxW/Math.max(1,letters.length))-8);
-  size=Math.max(26,size);
-  const gap=Math.round(size*0.16);
-  const total=letters.length*size+(letters.length-1)*gap;
+  const size=Math.min(64, Math.max(30, Math.floor((W-200)/Math.max(1,word.length))));
 
-  /* label above the tiles */
+  /* label above the word */
   ctx.textAlign='center';
   ctx.font='700 12px Segoe UI';
   ctx.fillStyle= e.isVocab? '#ffd166':'rgba(255,232,190,0.75)';
-  ctx.fillText((e.isVocab?'VOCABULARY · ':'')+e.rule.name.toUpperCase(), cx, cy-size*0.72-16);
+  ctx.fillText((e.isVocab?'VOCABULARY · ':'')+e.rule.name.toUpperCase(), cx, cy-46);
 
-  /* the word itself, as tiles on the desk */
-  const pulse = listening? Math.sin(t*7) : 0;
-  let x=cx-total/2+size/2;
-  letters.forEach((ch,i)=>{
-    const lift = listening? Math.sin(t*6-i*0.5)*3 : 0;
-    drawTile(x, cy+lift, size, ch, {
-      hot: listening,
-      rot: (((i*37)%7)-3)*0.006
-    });
-    x+=size+gap;
-  });
+  /* the word itself, plain and large */
+  const glow = listening? 0.5+Math.sin(t*7)*0.5 : 0;
+  ctx.save();
+  ctx.font='800 '+size+'px Georgia, "Segoe UI", serif';
+  ctx.textBaseline='middle';
+  ctx.shadowColor='rgba(255,209,102,'+(0.35+glow*0.5)+')';
+  ctx.shadowBlur=18+glow*22;
+  ctx.fillStyle= listening? '#fff3d0' : '#fdf6e3';
+  ctx.fillText(word, cx, cy-4);
+  ctx.restore();
+
+  /* pronunciation line, straight under the word */
+  const ipa = e.ipa;   /* the respelling has its own line below */
+  if(ipa){
+    ctx.font='600 20px "Segoe UI", sans-serif';
+    ctx.fillStyle='#ffd166';
+    ctx.fillText(ipa, cx, cy+size*0.62+8);
+  }
 
   /* respelling or tip, below the tiles */
-  const belowY=cy+size*0.62+24;
+  const belowY=cy+size*0.62+34;
   if(e.isVocab && e.meaning){
     ctx.font='italic 500 14px Georgia, serif'; ctx.fillStyle='rgba(255,236,200,0.86)';
     const mm = e.meaning.length>72 ? e.meaning.slice(0,70)+'…' : e.meaning;
@@ -1861,7 +1997,7 @@ function drawWordCard(t){
   }
 
   /* attempt dots */
-  const ax=cx+total/2+22;
+  const ax=cx+Math.min(300, size*word.length*0.34)+34;
   for(let i=0;i<MAX_ATTEMPTS;i++){
     ctx.beginPath(); ctx.arc(ax, cy-size*0.4+i*13, 4, 0, Math.PI*2);
     ctx.fillStyle = i<state.attempt ? '#e05a4a' : 'rgba(255,232,190,0.3)';
@@ -1872,7 +2008,7 @@ function drawWordCard(t){
   const n=state.entries.length, pw=Math.min(9,n);
   for(let i=0;i<pw;i++){
     const px=cx-(pw-1)*7+i*14;
-    ctx.beginPath(); ctx.arc(px, cy+size*0.62+46, 3.4, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(px, cy+size*0.62+58, 3.4, 0, Math.PI*2);
     ctx.fillStyle = i<state.idx ? '#8ac48a' : i===state.idx ? '#ffd166' : 'rgba(255,232,190,0.26)';
     ctx.fill();
   }
