@@ -376,9 +376,16 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var
 }
 
 .formgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+/* The cell is marked, not just its box: the trainer's desk shows the
+   trainee's typed answer as text, the trainee's own screen shows it in
+   an input, and both must go green or red the same way. */
+.formcell { border: 1px solid transparent; border-radius: 12px; padding: 8px 10px; transition: background .15s, border-color .15s; }
+.formcell.right { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.formcell.wrong { border-color: color-mix(in srgb, var(--danger) 55%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .formcell.right input { border-color: var(--accent); }
 .formcell.wrong input { border-color: var(--danger); }
 .formcell .ans { font-size: 12px; color: var(--accent); margin-top: 4px; min-height: 16px; }
+.formcell.wrong .ans { color: var(--danger); }
 
 .picture-frame {
   width: 100%; max-height: 58vh; object-fit: contain; border-radius: var(--radius-lg);

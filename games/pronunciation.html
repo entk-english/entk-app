@@ -643,8 +643,20 @@ if(SR){
     stopListening();
     if(gotResult){ emptyRuns = 0; return; }
     emptyRuns++;
-    /* Twice in a row with nothing at all, on the online recognizer,
-       is the network symptom rather than a quiet trainee. */
+    /* Two silent runs while a second capture is open is the classic
+       Windows device-contention symptom: the recording comes out
+       perfectly and the recogniser is handed silence. Drop the
+       recording first — it is the cheaper suspect — and only blame the
+       network if it keeps happening without one. */
+    if(emptyRuns >= 2 && recordPlayback){
+      recordPlayback = false;
+      const box = document.getElementById('recToggle');
+      if(box) box.checked = false;
+      emptyRuns = 0;
+      setStatus('Nothing came back twice. Voice recording is now off — it can starve the ' +
+                'recogniser on some machines. Tap the mic and say <b>' + current().word + '</b> again.');
+      return;
+    }
     if(emptyRuns >= 2 && speechMode === 'cloud'){
       const offer = document.getElementById('localBtn');
       setStatus(offer && offer.style.display !== 'none'
@@ -920,6 +932,7 @@ function handleAttempt(pct, heard){
    actually lands the hit and goes into the record.
    ------------------------------------------------------------ */
 function markManually(good){
+  if(MONITOR) return;
   if(state.busy || !state.running) return;
   if(listening){ try{ recognition.stop(); }catch(e){} stopListening(); }
   micBtn.classList.remove('retry');
@@ -937,11 +950,98 @@ window.addEventListener('message', function(e){
   const m = e.data;
   if(!m || m.source !== 'antoch-host') return;
   if(m.type === 'mark'){
+    if(MONITOR) return;              // a mirror is never the one playing
     if(!m.seq || m.seq <= lastRemoteMark) return;
     lastRemoteMark = m.seq;
     markManually(m.verdict === 'good');
   }
+  if(m.type === 'sync' && MONITOR) applySnapshot(m.s);
 });
+
+/* ------------------------------------------------------------
+   MIRRORING
+   The trainer used to watch a second, independent copy of this game,
+   so a monster the trainee had already killed stood there alive on
+   the trainer's screen. #monitor=1 puts the engine in read-only: it
+   draws whatever snapshot the trainee's device sends and simulates
+   nothing of its own. The trainee's copy publishes that snapshot on a
+   timer — a timer, not requestAnimationFrame, because a backgrounded
+   tab stops frames but keeps timers.
+   ------------------------------------------------------------ */
+const MONITOR = /[#&]monitor=1/.test(location.hash);
+const EMBEDDED = window.parent !== window;
+
+function snapshot(){
+  return {
+    at: Date.now(),
+    idx: state.idx, bossIdx: state.bossIdx,
+    bossHP: state.bossHP, bossMax: state.bossMax, bossScale: state.bossScale || 1,
+    heroHP: state.heroHP, heroMax: state.heroMax,
+    combo: state.combo, score: state.score, cleared: state.cleared || 0,
+    attempt: state.attempt, running: state.running, busy: state.busy,
+    count: state.entries.length, word: current().word,
+    status: document.getElementById('statusLine').innerHTML
+  };
+}
+
+if(EMBEDDED && !MONITOR){
+  setInterval(function(){
+    if(!state.entries.length) return;
+    try{
+      window.parent.postMessage({ source:'antoch-game', game:'pronunciation',
+        type:'state', s:snapshot() }, '*');
+    }catch(e){}
+  }, 500);
+}
+
+let lastSyncAt = 0;
+function applySnapshot(s){
+  if(!s || s.at <= lastSyncAt) return;
+  lastSyncAt = s.at;
+  if(!state.entries.length) return;
+
+  /* a new monster: rebuild the level's look, no sound — the trainer is
+     usually listening to the trainee, not to this */
+  if(s.idx !== state.idx || s.bossIdx !== state.bossIdx){
+    state.idx = Math.min(s.idx, state.entries.length - 1);
+    state.bossIdx = s.bossIdx;
+    state.boss = BOSSES[state.bossIdx % BOSSES.length];
+    bossAnim.dead = 0; bossAnim.hit = 0; bossAnim.lunge = 0;
+    deathT = 0; projectiles = []; particles = []; rings = [];
+    state.bossShown = s.bossHP;
+    arriveT = 1; shake = Math.max(shake, 14);
+    state.levelBanner = 1;
+  }
+
+  if(s.bossHP < state.bossHP){
+    bossAnim.hit = 1; shake = Math.max(shake, 12);
+    const bp = bossPos();
+    burst(bp.x, bp.y, '#ffd166', 22);
+    popup(bp.x, bp.y-46, '-'+Math.round(state.bossHP - s.bossHP), '#ffd166', 26);
+  }
+  if(s.heroHP < state.heroHP){
+    heroAnim.hit = 1; shake = Math.max(shake, 10);
+    burst(heroPos().x, heroPos().y, '#ff5d73', 22);
+  }
+
+  state.bossHP = s.bossHP; state.bossMax = s.bossMax || state.bossMax;
+  state.bossScale = s.bossScale || 1;
+  state.heroHP = s.heroHP; state.heroMax = s.heroMax || 100;
+  state.combo = s.combo; state.score = s.score;
+  state.cleared = s.cleared; state.attempt = s.attempt;
+  state.running = s.running; state.busy = s.busy;
+  if(s.bossHP <= 0 && !bossAnim.dead){ bossAnim.dead = 1; deathT = 1; }
+  if(s.status) setStatus(s.status);
+}
+
+/* The mirror has no microphone, no verdict buttons and no keyboard of
+   its own: everything it shows arrives from the other device. */
+if(MONITOR){
+  ['controls','markRow','micHelp'].forEach(function(id){
+    const n = document.getElementById(id);
+    if(n) n.style.display = 'none';
+  });
+}
 
 /* Who may mark is stated in the URL, not guessed from whether the page
    sits in a frame. The trainee's screen embeds this game too, so the
@@ -2288,8 +2388,13 @@ function loop(){ update(); render(); requestAnimationFrame(loop); }
       shared.vocab.map(v=>v.meaning? v.word+' = '+v.meaning : v.word).join('\n');
     buildRound(shared.words, shared.vocab);
     showScreen('screenBattle');
-    warmUpMic();
-    setStatus('Your trainer picked these — tap the mic and say the first one');
+    if(MONITOR){
+      /* a mirror must never ask the trainer's browser for a microphone */
+      setStatus('Waiting for your trainee to start…');
+    }else{
+      warmUpMic();
+      setStatus('Your trainer picked these — tap the mic and say the first one');
+    }
   }else{
     buildRound(['water','better','little'], []);   // harmless default so canvas has state
     state.running=false;

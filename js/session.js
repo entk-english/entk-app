@@ -8,6 +8,7 @@
    ============================================================= */
 
 import { Store } from './store.js';
+import { openLink } from './live.js';
 import { UNSPLASH_ACCESS_KEY } from './config.js';
 import {
   WARMUP_FORMATS, WARMUPS, TOPICS, PRON_FALLBACK,
@@ -24,6 +25,7 @@ const DRILL_NAMES = {
 
 let S = null;          // live session state
 let tick = null;       // timer interval
+let link = null;       // direct line to the trainee's device
 
 export async function runSession(root, sessionId, backToApp) {
   const sessions = await Store.listSessions();
@@ -64,6 +66,16 @@ export async function runSession(root, sessionId, backToApp) {
      the previous stage clock running. */
   cleanup();
   window.addEventListener('message', onGameMessage);
+  link = openLink(record.id);
+  link.on(msg => {
+    if (!S) return;
+    if (msg.type === 'gamestate' && S.monitor && S.monitor.contentWindow) {
+      S.monitor.contentWindow.postMessage({ source: 'antoch-host', type: 'sync', s: msg.s }, '*');
+    }
+    /* Whatever stage is on screen may want the rest; it registers a
+       handler in S.onLink and drops it when it leaves. */
+    if (S.onLink) { try { S.onLink(msg); } catch (e) { /* never let a stage break the wire */ } }
+  });
   draw();
 }
 
@@ -97,6 +109,8 @@ function meta(stage) {
 
 function draw() {
   S.onLeave = null;
+  S.onLink = null;
+  S.monitor = null;
   const stage = S.stages[S.idx];
   const m = meta(stage);
   const shell = el('<div class="session-shell"></div>');
@@ -246,6 +260,7 @@ async function finish() {
 function cleanup() {
   clearInterval(tick);
   window.removeEventListener('message', onGameMessage);
+  if (link) { link.close(); link = null; }
 }
 
 /* =============================================================
@@ -551,6 +566,9 @@ function stagePron(body) {
     c.hits = good ? (c.hits || 0) + 1 : 0;
     if (c.hits >= 3) { c.hits = 0; c.wordIndex = Math.min(words.length - 1, (c.wordIndex || 0) + 1); }
     paintPanel();
+    /* Straight down the wire first — the session record is the fallback
+       for a trainee whose channel has not connected, not the fast path. */
+    if (link) link.send('mark', { seq: c.seq, verdict: c.verdict });
     await persist();
     toast(good ? 'Correct — hit sent.' : 'Wrong — sent.', good ? 'ok' : 'err');
   };
@@ -564,18 +582,32 @@ function stagePron(body) {
     if (e.key === '2') { e.preventDefault(); sendMark(false); }
   };
   document.addEventListener('keydown', keyMark);
-  S.onLeave = () => document.removeEventListener('keydown', keyMark);
 
-  /* A small monitor, muted and unplayable, so the trainer can see what
-     the trainee sees without needing a second microphone. */
-  const frame = el('<iframe class="gameframe" style="height:min(52vh,460px)" src="games/pronunciation.html#mark=1&r=' +
+  /* A mirror, not a second game. It has no microphone and no engine of
+     its own: it redraws the snapshot the trainee's copy sends every half
+     second, so a monster they have killed is dead here too. */
+  const frame = el('<iframe class="gameframe" style="height:min(52vh,460px)" src="games/pronunciation.html#monitor=1&r=' +
     encodeURIComponent(b64({ w: words, v: [] })) + '"></iframe>');
-  body.appendChild(el('<p class="sub" style="margin:18px 0 6px">What your trainee sees</p>'));
+  body.appendChild(el('<p class="sub" style="margin:18px 0 6px">What your trainee sees — mirrored from their device</p>'));
   body.appendChild(frame);
+  S.monitor = frame;
+  S.onLeave = () => { document.removeEventListener('keydown', keyMark); S.monitor = null; };
 
   S.data.pron = S.data.pron || { words };
 
-  $('[data-reload]', body).onclick = () => { frame.src = frame.src; };
+  /* Restart means restart the round the trainee is playing; the mirror
+     follows because it reloads with it. */
+  $('[data-reload]', body).onclick = () => {
+    /* seq keeps climbing — the trainee's guard against replaying an old
+       mark counts on it never going backwards. */
+    const seq = (S.data.control && S.data.control.seq) || 0;
+    S.data.control = { seq, verdict: null, wordIndex: 0, hits: 0, restart: Date.now() };
+    if (link) link.send('restart', {});
+    frame.src = frame.src;
+    paintPanel();
+    persist();
+    toast('Restarted on both screens.');
+  };
   $('[data-edit]', body).onclick = () => {
     const current = $('#pron-edit');
     if (current) return;
@@ -627,6 +659,9 @@ function stageQuickRound(body) {
    DRILL — WORD FORMS
    ============================================================= */
 
+/* The trainee types the four forms on their own device; this side is a
+   marking desk. Their answers arrive as they type, and Check and Reveal
+   land on their screen, not this one. */
 function stageWordForm(body) {
   const bank = forLevel(WORD_FORMS, S.trainee.level);
   const store = S.data.extras.wordform = S.data.extras.wordform || { done: [], correct: 0, asked: 0 };
@@ -642,62 +677,103 @@ function stageWordForm(body) {
     ['adjective', 'Adjective / -ing']
   ];
 
+  /* what the trainee currently has typed, by field */
+  let given = {};
+  let heard = false;   // has their device said anything at all yet
+
+  const verdicts = () => {
+    const out = {};
+    FIELDS.forEach(([k]) => {
+      const answers = (item[k] || []).map(a => a.toLowerCase());
+      const typed = (given[k] || '').trim().toLowerCase();
+      out[k] = typed ? answers.includes(typed) : false;
+    });
+    return out;
+  };
+
+  const answerKey = () => {
+    const out = {};
+    FIELDS.forEach(([k]) => { out[k] = (item[k] || []).join(' / '); });
+    return out;
+  };
+
+  function paint(marked, revealed) {
+    const v = marked ? verdicts() : null;
+    const key = revealed ? answerKey() : null;
+    $('#wf-cells', card).innerHTML = FIELDS.map(([k, label]) => {
+      const typed = (given[k] || '').trim();
+      const cls = v ? (v[k] ? ' right' : typed || revealed ? ' wrong' : '') : '';
+      return '<div class="formcell' + cls + '" data-k="' + k + '">' +
+        '<label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">' +
+        label + '</label>' +
+        '<div style="font-size:19px;font-weight:700;min-height:26px;margin-top:4px">' +
+          (typed ? esc(typed) : '<span style="color:var(--muted);font-weight:500">…</span>') + '</div>' +
+        '<div class="ans">' + (key ? esc(key[k]) : v ? (v[k] ? '✓' : '✗') : '') + '</div>' +
+      '</div>';
+    }).join('');
+    $('#wf-status', card).textContent = heard
+      ? 'Typing on their device.'
+      : 'Waiting for their device — nothing typed yet.';
+  }
+
   function drawItem() {
+    given = {}; heard = false;
     publish({ kind: 'wordform', base: item.base });
+    if (link) link.send('wfnext', { base: item.base });
     card.innerHTML =
       '<div class="prompt-box">' + esc(item.base.charAt(0).toUpperCase() + item.base.slice(1)) + '</div>' +
-      '<div class="formgrid" style="margin-top:18px">' +
-        FIELDS.map(([k, label]) =>
-          '<div class="formcell" data-k="' + k + '"><label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">' +
-          label + '</label><input data-f="' + k + '"><div class="ans"></div></div>').join('') +
-      '</div>' +
+      '<p class="sub" style="margin:10px 0 0">Your trainee types the four forms. You mark them from here.</p>' +
+      '<div class="formgrid" id="wf-cells" style="margin-top:18px"></div>' +
       '<div class="row" style="margin-top:16px">' +
         '<button class="btn" data-check>Check</button>' +
         '<button class="btn ghost" data-reveal>Reveal</button>' +
         '<button class="btn ghost" data-nextword>Next word</button>' +
-        '<span class="spacer"></span><span class="badge">' + store.correct + ' / ' + store.asked + ' correct so far</span>' +
+        '<span class="spacer"></span>' +
+        '<span class="sub" id="wf-status" style="margin:0"></span>' +
+        '<span class="badge">' + store.correct + ' / ' + store.asked + ' correct so far</span>' +
       '</div>';
+    paint(false, false);
 
-    $('[data-check]', card).onclick = () => check(false);
-    $('[data-reveal]', card).onclick = () => check(true);
+    $('[data-check]', card).onclick = () => {
+      paint(true, false);
+      if (link) link.send('wfcheck', { verdicts: verdicts(), reveal: null });
+      else toast('No live link to their device yet.', 'err');
+    };
+    $('[data-reveal]', card).onclick = () => {
+      paint(true, true);
+      if (link) link.send('wfcheck', { verdicts: verdicts(), reveal: answerKey() });
+    };
     $('[data-nextword]', card).onclick = () => {
-      bank_score();
-      if (!store.done.includes(item.base)) store.done.push(item.base);
+      bankScore();
       const remaining = bank.filter(w => !store.done.includes(w.base));
       item = pickOne(remaining.length ? remaining : bank);
       drawItem();
       persist();
     };
-    $$('input', card).forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') check(false); }));
-    $('input', card).focus();
   }
 
   /* Marking happens once per word, when the trainer moves on, so
      that pressing Check twice does not distort the tally. */
-  function bank_score() {
+  function bankScore() {
     if (store.done.includes(item.base)) return;
+    const v = verdicts();
     FIELDS.forEach(([k]) => {
-      const given = $('[data-k="' + k + '"] input', card).value.trim().toLowerCase();
-      if (!given) return;
+      if (!(given[k] || '').trim()) return;
       store.asked++;
-      if ((item[k] || []).some(a => a.toLowerCase() === given)) store.correct++;
+      if (v[k]) store.correct++;
     });
     store.done.push(item.base);
   }
 
-  function check(reveal) {
-    FIELDS.forEach(([k]) => {
-      const cell = $('[data-k="' + k + '"]', card);
-      const answers = item[k] || [];
-      const given = $('input', cell).value.trim().toLowerCase();
-      const ok = answers.some(a => a.toLowerCase() === given);
-      cell.className = 'formcell ' + (ok ? 'right' : given || reveal ? 'wrong' : '');
-      $('.ans', cell).textContent = ok ? '✓' : (reveal ? answers.join(' / ') : '');
-    });
-  }
+  S.onLink = (msg) => {
+    if (msg.type !== 'wfanswers') return;
+    given = msg.answers || {};
+    heard = true;
+    paint(false, false);
+  };
 
   drawItem();
-  S.onLeave = bank_score;   // mark the word in progress when the trainer moves on
+  S.onLeave = bankScore;   // mark the word in progress when the trainer moves on
 }
 
 /* =============================================================

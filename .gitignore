@@ -6,3 +6,6 @@ antoch-backup-*.json
 Thumbs.db
 .vscode/
 node_modules/
+
+# local preview server used while developing
+.claude/

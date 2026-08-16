@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mirror test — player vs monitor</title>
+<style>
+  body { font-family: Segoe UI, sans-serif; margin: 12px; background:#10131a; color:#e8ecf4; }
+  .row { display:flex; gap:10px; }
+  iframe { width: 49%; height: 520px; border:1px solid #333; border-radius:8px; }
+  button { padding:8px 14px; margin-right:8px; font-size:15px; }
+  #log { font-family: monospace; font-size:12px; white-space:pre-wrap; max-height:200px; overflow:auto; }
+</style>
+</head>
+<body>
+<h3>Left = trainee (player) · Right = trainer (monitor)</h3>
+<div>
+  <button id="good">Mark good (1)</button>
+  <button id="bad">Mark wrong (2)</button>
+  <button id="dump">Dump both states</button>
+</div>
+<div class="row">
+  <iframe id="player" src="games/pronunciation.html#r=" allow="microphone"></iframe>
+  <iframe id="monitor" src="games/pronunciation.html#monitor=1&r="></iframe>
+</div>
+<div id="log"></div>
+<script>
+const words = ['water','better','little'];
+const enc = btoa(unescape(encodeURIComponent(JSON.stringify({ w: words, v: [] }))));
+const player = document.getElementById('player');
+const monitor = document.getElementById('monitor');
+player.src = 'games/pronunciation.html#r=' + encodeURIComponent(enc);
+monitor.src = 'games/pronunciation.html#monitor=1&r=' + encodeURIComponent(enc);
+
+const log = (m) => { document.getElementById('log').textContent += m + '\n'; };
+let seq = 0, seen = 0;
+
+window.addEventListener('message', e => {
+  const m = e.data;
+  if (!m || m.source !== 'antoch-game') return;
+  if (m.type === 'state') {
+    seen++;
+    monitor.contentWindow.postMessage({ source:'antoch-host', type:'sync', s:m.s }, '*');
+    if (seen % 6 === 1) log('state -> monitor: idx=' + m.s.idx + ' bossHP=' + m.s.bossHP + '/' + m.s.bossMax + ' word=' + m.s.word);
+  }
+});
+
+document.getElementById('good').onclick = () => {
+  seq++;
+  player.contentWindow.postMessage({ source:'antoch-host', type:'mark', seq, verdict:'good' }, '*');
+  log('mark good seq=' + seq);
+};
+document.getElementById('bad').onclick = () => {
+  seq++;
+  player.contentWindow.postMessage({ source:'antoch-host', type:'mark', seq, verdict:'bad' }, '*');
+  log('mark bad seq=' + seq);
+};
+document.getElementById('dump').onclick = () => {
+  const p = player.contentWindow.snapshot(), m = monitor.contentWindow.snapshot();
+  log('PLAYER  idx=' + p.idx + ' bossIdx=' + p.bossIdx + ' bossHP=' + Math.round(p.bossHP) + '/' + p.bossMax + ' hero=' + p.heroHP + ' combo=' + p.combo);
+  log('MONITOR idx=' + m.idx + ' bossIdx=' + m.bossIdx + ' bossHP=' + Math.round(m.bossHP) + '/' + m.bossMax + ' hero=' + m.heroHP + ' combo=' + m.combo);
+};
+</script>
+</body>
+</html>

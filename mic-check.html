@@ -69,6 +69,16 @@
 </div>
 
 <div class="card">
+  <h2>5b. Recognition while your voice is also being recorded</h2>
+  <p class="sub" style="margin:0 0 8px">The game records the attempt for playback at the same time as it
+  recognises it — two captures of one microphone. On some Windows machines the second capture is exactly
+  what leaves the recogniser with silence, which looks like “it recorded fine but scored 0%”.
+  Say <b>water</b> again. If section 4 heard you and this one does not, that is the fault.</p>
+  <div class="row"><button id="dual" disabled>Record and listen together</button></div>
+  <div id="dualOut"></div>
+</div>
+
+<div class="card">
   <h2>6. Network, and on-device recognition</h2>
   <p class="sub" style="margin:0 0 8px">Chrome normally sends your audio to Google and waits for text back.
   If that route is blocked, recognition hangs and returns nothing. Chrome can also run it entirely on your
@@ -141,6 +151,7 @@ document.getElementById('gum').onclick = async () => {
     put('gumOut','track state', track.readyState + ', muted=' + track.muted,
         track.readyState==='live' && !track.muted ? 'ok' : 'bad');
     document.getElementById('sr').disabled = !SR;
+    document.getElementById('dual').disabled = !SR;
     startMeter();
     listDevices();
   }catch(e){
@@ -231,6 +242,68 @@ document.getElementById('sr').onclick = () => {
 
   try{ rec.start(); }
   catch(e){ put('srOut','recognition on page','could not start — '+e.message,'bad'); }
+};
+
+/* ---- 5b. recognition with a MediaRecorder running beside it ----
+   The game does both at once. This runs the identical pair so the two
+   traces can be compared: same words, same machine, one variable. */
+document.getElementById('dual').onclick = async () => {
+  const btn = document.getElementById('dual');
+  btn.disabled = true; btn.textContent = 'Recording and listening…';
+
+  let recStream = null, recorder = null, chunks = [], bytes = 0;
+  try{
+    recStream = await navigator.mediaDevices.getUserMedia({audio:true});
+    recorder = new MediaRecorder(recStream);
+    recorder.ondataavailable = ev => { if(ev.data.size){ chunks.push(ev.data); bytes += ev.data.size; } };
+    recorder.start();
+  }catch(e){
+    put('dualOut','second capture','could not start — '+e.name,'bad');
+  }
+
+  const rec = new SR();
+  rec.lang = 'en-US'; rec.maxAlternatives = 5;
+  rec.interimResults = true; rec.continuous = false;
+
+  const t0 = Date.now();
+  const trace = [];
+  let got = false;
+  const mark = name => trace.push(name + '@' + (Date.now()-t0) + 'ms');
+  ['audiostart','soundstart','speechstart','speechend','soundend','audioend','start','nomatch']
+    .forEach(ev => rec.addEventListener(ev, () => mark(ev)));
+
+  const finish = () => {
+    btn.disabled = false; btn.textContent = 'Record and listen together';
+    try{ if(recorder && recorder.state === 'recording') recorder.stop(); }catch(e){}
+    try{ if(recStream) recStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+    setTimeout(()=>{
+      put('dualOut','audio captured', bytes ? (Math.round(bytes/1024)+' KB recorded') : 'nothing recorded',
+          bytes ? 'ok' : 'bad');
+      put('dualOut','verdict',
+        got ? 'recognition survives recording — the two captures are not the problem'
+            : 'nothing came back WHILE recording. If section 4 heard you, recording is what breaks scoring.',
+        got ? 'ok' : 'bad');
+    }, 250);
+  };
+
+  rec.onresult = e => {
+    got = true;
+    mark('result' + (e.results[0].isFinal ? '(final)' : '(interim)'));
+    put('dualOut','recognition while recording','HEARD: "'+e.results[0][0].transcript+'"','ok');
+  };
+  rec.onerror = e => { mark('error:'+e.error);
+    put('dualOut','recognition while recording','FAILED — error: '+e.error,'bad'); };
+  rec.onend = () => {
+    mark('end');
+    if(!got) put('dualOut','recognition while recording',
+      'no result after '+((Date.now()-t0)/1000).toFixed(1)+'s','bad');
+    put('dualOut','event trace (recording)', trace.join(' → ') || '(no events fired at all)',
+        /speechstart/.test(trace.join(' ')) ? 'warn' : 'bad');
+    finish();
+  };
+
+  try{ rec.start(); }
+  catch(e){ put('dualOut','recognition while recording','could not start — '+e.message,'bad'); finish(); }
 };
 
 /* ---- 5. the same thing one frame deeper ---- */

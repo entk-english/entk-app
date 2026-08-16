@@ -8,6 +8,7 @@ import { Store, makeJoinCode } from './store.js';
 import { LEVELS, LEVEL_LABEL, TOPICS, forLevel } from './content.js';
 import { esc, el, $, $$, toast, modal, confirmBox, copyText, downloadText, fmtDate, fmtDateTime } from './ui.js';
 import { runSession } from './session.js';
+import { openLink } from './live.js';
 
 const root = document.getElementById('root');
 
@@ -625,6 +626,92 @@ let liveSessionOpen = false;
 let liveFrame = null;
 let lastMarkSeq = 0;
 let liveClock = null;
+let liveLink = null;        // direct line to the trainer's device
+let liveLinkId = null;      // which session that line belongs to
+
+/* The trainee's game is the one being played, so it is the source of
+   truth for the fight. Every snapshot it emits goes straight up the
+   wire; the trainer's screen mirrors it rather than simulating a second
+   copy of the same monster. */
+function relayGameState(e) {
+  const m = e.data;
+  if (!m || m.source !== 'antoch-game' || m.type !== 'state') return;
+  if (liveLink) liveLink.send('gamestate', { s: m.s });
+}
+window.addEventListener('message', relayGameState);
+
+/* The word form drill is typed here and marked there. The boxes live on
+   this device, every keystroke goes up the wire, and Check and Reveal
+   come back down as colours and answers on these same boxes. */
+const WF_FIELDS = [
+  ['noun', 'Noun'],
+  ['verb', 'Infinitive'],
+  ['past', 'Past'],
+  ['adjective', 'Adjective / -ing']
+];
+let wfGrid = null;
+let wfSendTimer = null;
+
+function wireWordForm(grid) {
+  wfGrid = grid;
+  const send = () => {
+    if (!liveLink) return;
+    const answers = {};
+    $$('input[data-f]', grid).forEach(i => { answers[i.dataset.f] = i.value; });
+    liveLink.send('wfanswers', { answers });
+  };
+  $$('input[data-f]', grid).forEach(input => {
+    input.addEventListener('input', () => {
+      /* their marker should see the answer land, not every keystroke */
+      clearTimeout(wfSendTimer);
+      wfSendTimer = setTimeout(send, 250);
+    });
+  });
+  send();
+}
+
+function paintWordFormCheck(msg) {
+  if (!wfGrid || !document.body.contains(wfGrid)) return;
+  const verdicts = msg.verdicts || {};
+  const reveal = msg.reveal || null;
+  WF_FIELDS.forEach(([k]) => {
+    const cell = $('[data-k="' + k + '"]', wfGrid);
+    if (!cell) return;
+    const typed = $('input', cell).value.trim();
+    const ok = !!verdicts[k];
+    cell.className = 'formcell ' + (ok ? 'right' : (typed || reveal) ? 'wrong' : '');
+    $('.ans', cell).textContent = reveal ? (reveal[k] || '') : (ok ? '✓' : typed ? '✗' : '');
+  });
+}
+
+function clearWordForm() {
+  if (!wfGrid || !document.body.contains(wfGrid)) return;
+  $$('input[data-f]', wfGrid).forEach(i => { i.value = ''; });
+  $$('.formcell', wfGrid).forEach(c => { c.className = 'formcell'; });
+  $$('.ans', wfGrid).forEach(a => { a.textContent = ''; });
+}
+
+/* Marks arrive here in well under a second; the 1.5s poll of the
+   session record stays as the fallback for a channel that never came up. */
+function openLiveLink(sessionId) {
+  if (liveLinkId === sessionId && liveLink) return;
+  if (liveLink) liveLink.close();
+  liveLinkId = sessionId;
+  liveLink = openLink(sessionId);
+  liveLink.on(msg => {
+    if (msg.type === 'mark') {
+      if (!msg.seq || msg.seq <= lastMarkSeq) return;
+      lastMarkSeq = msg.seq;
+      if (liveFrame && liveFrame.contentWindow) {
+        liveFrame.contentWindow.postMessage(
+          { source: 'antoch-host', type: 'mark', seq: msg.seq, verdict: msg.verdict }, '*');
+      }
+    }
+    if (msg.type === 'restart' && liveFrame) liveFrame.src = liveFrame.src;
+    if (msg.type === 'wfcheck') paintWordFormCheck(msg);
+    if (msg.type === 'wfnext') clearWordForm();
+  });
+}
 
 /* The dedicated page: the trainee lands on whatever stage the trainer
    is on, and plays the game on their own device. */
@@ -675,6 +762,7 @@ async function followLiveSession(host, trainee) {
     if (!live) {
       const was = liveSessionOpen;
       liveSessionOpen = false;
+      if (liveLink) { liveLink.close(); liveLink = null; liveLinkId = null; }
       if (lastKey !== 'none') {
         lastKey = 'none';
         host.innerHTML = '';
@@ -685,6 +773,7 @@ async function followLiveSession(host, trainee) {
     }
     const firstSighting = !liveSessionOpen;
     liveSessionOpen = true;
+    openLiveLink(live.id);
     if (firstSighting && location.hash.indexOf('live') < 0) render();
 
     const d = live.data || {};
@@ -756,14 +845,19 @@ async function followLiveSession(host, trainee) {
       liveFrame = frame;
     }
 
-    /* --- word forms: the base word and the four boxes to say --- */
+    /* --- word forms: their four boxes, typed on their own device --- */
     else if (stage === 'wordform' || (stage === 'stage4' && dsp.kind === 'wordform')) {
       host.appendChild(el('<div class="prompt-box">' + esc((dsp.base || '…').toUpperCase()) + '</div>'));
-      host.appendChild(el('<div class="formgrid" style="margin-top:18px">' +
-        ['Noun', 'Infinitive', 'Past', 'Adjective / -ing'].map(l =>
-          '<div class="card tight" style="text-align:center"><div class="eyebrow">' + l + '</div>' +
-          '<div style="font-size:22px;color:var(--muted)">?</div></div>').join('') + '</div>'));
-      host.appendChild(el('<p class="sub" style="text-align:center;margin-top:12px">Say all four forms out loud.</p>'));
+      const grid = el('<div class="formgrid" style="margin-top:18px">' +
+        WF_FIELDS.map(([k, label]) =>
+          '<div class="formcell" data-k="' + k + '">' +
+          '<label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">' +
+          label + '</label><input data-f="' + k + '" autocomplete="off" autocapitalize="off" spellcheck="false">' +
+          '<div class="ans"></div></div>').join('') + '</div>');
+      host.appendChild(grid);
+      host.appendChild(el('<p class="sub" style="text-align:center;margin-top:12px">' +
+        'Type all four forms. Your trainer marks them from their screen.</p>'));
+      wireWordForm(grid);
     }
 
     /* --- expansion: the sentence growing as they add to it --- */
