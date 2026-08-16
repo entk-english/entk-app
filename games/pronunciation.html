@@ -947,6 +947,7 @@ window.addEventListener('message', function(e){
     markManually(m.verdict === 'good');
   }
   if(m.type === 'sync' && MONITOR) applySnapshot(m.s);
+  if(m.type === 'fx' && MONITOR) playFx(m.fx);
 });
 
 /* ------------------------------------------------------------
@@ -987,6 +988,66 @@ if(EMBEDDED && !MONITOR){
   }, 500);
 }
 
+/* A snapshot every half second keeps the numbers honest, but it cannot
+   show a blow being struck: by the time it arrives the swing is over.
+   So the moment of impact is sent as an event of its own and the mirror
+   replays it through the same routine the trainee's screen used —
+   projectile, rings, sparks, damage number, the lot. Silent, because
+   the trainer is listening to the trainee, not to this. */
+function emitFx(fx){
+  if(!(EMBEDDED && !MONITOR)) return;
+  try{
+    window.parent.postMessage({ source:'antoch-game', game:'pronunciation',
+      type:'fx', fx:fx }, '*');
+  }catch(e){}
+}
+
+function playFx(fx){
+  if(!fx) return;
+  if(fx.kind === 'attack'){
+    const atk = attackFor(fx.combo || 1, fx.stars || 3);
+    heroAnim.cast = 1;
+    queueProj(heroPos(), bossPos(), atk.core, ()=>{
+      const bp = bossPos();
+      bossAnim.hit = 1; shake = Math.max(shake, 15);
+      burst(bp.x, bp.y, atk.core, atk.n);
+      burst(bp.x, bp.y, atk.edge, Math.round(atk.n*0.7));
+      burst(bp.x, bp.y, '#fff6d0', Math.round(atk.n*0.4));
+      shake = Math.max(shake, 12 + atk.ring*4);
+      for(let k=0;k<atk.ring;k++){
+        rings.push({x:bp.x,y:bp.y,r:6+k*14,max:110+k*45,life:28+k*7,
+                    color:k%2?atk.edge:atk.core});
+      }
+      popup(bp.x, bp.y-84, atk.name, atk.edge, atk.ring>2?22:17);
+      rings.push({x:bp.x,y:bp.y,r:10,max:80,life:26,color:'#7cf5c4'});
+      if(fx.dmg) popup(bp.x, bp.y-46, '-'+fx.dmg, '#ffd166', 30);
+      if(fx.combo > 1) popup(bp.x, bp.y-70, 'COMBO x'+fx.combo, '#ffd166', 17);
+    });
+    return;
+  }
+  if(fx.kind === 'counter'){
+    bossAnim.lunge = 1;
+    queueProj(bossPos(), heroPos(), '#ff5d73', ()=>{
+      const hp = heroPos();
+      heroAnim.hit = 1; shake = Math.max(shake, 12);
+      burst(hp.x, hp.y, '#ff5d73', 34);
+      popup(hp.x, hp.y-46, '-14', '#ff5d73', 20);
+    });
+    return;
+  }
+  if(fx.kind === 'defeat'){
+    bossAnim.dead = 1; deathT = 1; deathBurst = false;
+    return;
+  }
+  if(fx.kind === 'march'){ marchT = 1; travel = 1; travelDir = 1; return; }
+  if(fx.kind === 'arrive'){
+    deathT = 0; arriveT = 1; shake = Math.max(shake, 16);
+    const bp = bossPos();
+    burst(bp.x, bp.y+40, 'rgba(255,240,210,0.85)', 26);
+    rings.push({x:bp.x,y:bp.y+50,r:10,max:150,life:26,color:'#ffe6b8'});
+  }
+}
+
 let lastSyncAt = 0;
 function applySnapshot(s){
   if(!s || s.at <= lastSyncAt) return;
@@ -1006,15 +1067,14 @@ function applySnapshot(s){
     state.levelBanner = 1;
   }
 
-  if(s.bossHP < state.bossHP){
-    bossAnim.hit = 1; shake = Math.max(shake, 12);
-    const bp = bossPos();
-    burst(bp.x, bp.y, '#ffd166', 22);
-    popup(bp.x, bp.y-46, '-'+Math.round(state.bossHP - s.bossHP), '#ffd166', 26);
+  /* The blow itself arrives as an fx event and is already playing; the
+     snapshot only has to keep the numbers true. A tiny nudge covers the
+     case where an event was lost on the way. */
+  if(s.bossHP < state.bossHP && !projectiles.length){
+    bossAnim.hit = 1; shake = Math.max(shake, 10);
   }
-  if(s.heroHP < state.heroHP){
-    heroAnim.hit = 1; shake = Math.max(shake, 10);
-    burst(heroPos().x, heroPos().y, '#ff5d73', 22);
+  if(s.heroHP < state.heroHP && !projectiles.length){
+    heroAnim.hit = 1; shake = Math.max(shake, 8);
   }
 
   state.bossHP = s.bossHP; state.bossMax = s.bossMax || state.bossMax;
@@ -1088,6 +1148,8 @@ function applyResult(pct, heard, entry, manual){
             : stars===2? '⭐⭐ Good — '+pct+'%. '+entry.rule.tip
             : '⭐ Close — '+pct+'%. '+entry.rule.tip);
     sfx('hit');
+    /* the mirror strikes the same blow at the same moment */
+    emitFx({ kind:'attack', combo:state.combo, stars:stars, dmg:dmg });
     setTimeout(()=>{
       queueProj(heroPos(), bossPos(), atk.core, ()=>{
         state.bossHP = Math.max(0, state.bossHP-dmg);
@@ -1115,6 +1177,7 @@ function applyResult(pct, heard, entry, manual){
       ? '✗ Marked needs work. '+entry.rule.tip
       : '❌ '+pct+'% — heard "<b>'+ (heard||'…') +'</b>". '+(why||entry.rule.tip));
     sfx('miss');
+    emitFx({ kind:'counter' });
     setTimeout(()=>{
       queueProj(bossPos(), heroPos(), '#ff5d73', ()=>{
         state.heroHP = Math.max(0, state.heroHP-7);
@@ -1171,12 +1234,14 @@ function advance(){
     /* beat one: the monster comes apart */
     deathT = 1; deathBurst = false;
     sfx('win');
+    emitFx({ kind:'defeat' });
 
     setTimeout(()=>{
       /* beat two: the hero marches out and the arena slides past */
       setStatus('Marching on…');
       marchT = 1;
       travel = 1; travelDir = 1;
+      emitFx({ kind:'march' });
 
       setTimeout(()=>{
         /* beat three: the next monster lands */
@@ -1188,6 +1253,7 @@ function advance(){
         arriveT = 1;
         shake = Math.max(shake, 16);
         sfx('land');
+        emitFx({ kind:'arrive' });
         const bp = bossPos();
         burst(bp.x, bp.y+40, 'rgba(255,240,210,0.85)', 26);
         rings.push({x:bp.x,y:bp.y+50,r:10,max:150,life:26,color:'#ffe6b8'});

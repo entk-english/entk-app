@@ -644,6 +644,13 @@ function relayGameState(e) {
     if (liveLink) liveLink.send('gamestate', { s: m.s });
     return;
   }
+  /* the swing itself, sent the instant it happens rather than waiting
+     for the next snapshot — otherwise the trainer sees the health drop
+     with no blow to explain it */
+  if (m.type === 'fx') {
+    if (liveLink) liveLink.send('gamefx', { fx: m.fx });
+    return;
+  }
   if (m.type === 'recording') sendRecording(m);
 }
 window.addEventListener('message', relayGameState);

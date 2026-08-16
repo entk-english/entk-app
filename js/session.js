@@ -92,6 +92,9 @@ export async function runSession(root, sessionId, backToApp) {
     if (msg.type === 'gamestate' && S.monitor && S.monitor.contentWindow) {
       S.monitor.contentWindow.postMessage({ source: 'antoch-host', type: 'sync', s: msg.s }, '*');
     }
+    if (msg.type === 'gamefx' && S.monitor && S.monitor.contentWindow) {
+      S.monitor.contentWindow.postMessage({ source: 'antoch-host', type: 'fx', fx: msg.fx }, '*');
+    }
     /* Whatever stage is on screen may want the rest; it registers a
        handler in S.onLink and drops it when it leaves. */
     if (S.onLink) { try { S.onLink(msg); } catch (e) { /* never let a stage break the wire */ } }

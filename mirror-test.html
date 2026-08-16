@@ -42,6 +42,10 @@ window.addEventListener('message', e => {
     monitor.contentWindow.postMessage({ source:'antoch-host', type:'sync', s:m.s }, '*');
     if (seen % 6 === 1) log('state -> monitor: idx=' + m.s.idx + ' bossHP=' + m.s.bossHP + '/' + m.s.bossMax + ' word=' + m.s.word);
   }
+  if (m.type === 'fx') {
+    monitor.contentWindow.postMessage({ source:'antoch-host', type:'fx', fx:m.fx }, '*');
+    log('fx -> monitor: ' + m.fx.kind + (m.fx.dmg ? ' dmg=' + m.fx.dmg : ''));
+  }
 });
 
 document.getElementById('good').onclick = () => {
