@@ -12,7 +12,7 @@ Paste this whole file into a new session to pick up exactly where the last one s
 | **Live site** | https://entk-english.github.io/entk-app/ |
 | **Repo** | https://github.com/entk-english/entk-app (public — Pages needs public on the free plan) |
 | **Branch** | `main` |
-| **Current build** | `b33` (shown at the bottom of the sign-in card) |
+| **Current build** | `b34` (shown at the bottom of the sign-in card) |
 | **Diagnostic page** | https://entk-english.github.io/entk-app/mic-check.html |
 
 ### Files
@@ -122,11 +122,14 @@ each heading, a patterned prompt box, the stage bar redrawn as a route with a pu
 current stage, and lift on buttons, chips and rows. All of it off under
 `prefers-reduced-motion`.
 
-## The drills (b32)
+## The drills (b32, standing from b34)
 
 Three more, all two-way — the trainee works on their own device and the trainer marks from
-theirs. Choose one as the quick round, tap them in *Extra rounds* when planning, or add one
-mid-session with **+ Drill**.
+theirs. From b34 they are **standing stages**: every session's bar carries Warm-up, Free
+Talk, Pronunciation Boxing, the quick round, Connector Chaining, PREP Answer, The Forbidden
+Word, Picture Description and the Feedback Note. Nine stages is deliberate — a trainer passes
+one with *Next stage*, or takes it off today's bar with **− Remove**, which sticks when the
+session is reopened.
 
 - **Connector Chaining** — a situation on their screen and a set of connectors they must join
   their ideas with. Their sentence arrives on the trainer's desk as they type, and any

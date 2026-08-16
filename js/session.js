@@ -39,25 +39,34 @@ export async function runSession(root, sessionId, backToApp) {
   const history = sessions.filter(s => s.trainee_id === record.trainee_id && s.id !== sessionId && s.ended_at);
 
   const plan = record.plan || {};
-  /* Picture Description is a stage in its own right, not something
-     buried in a dropdown: it belongs on the bar next to Warm-up and
-     Pronunciation Boxing, where the trainer can see it coming. */
+  /* These are stages in their own right, not things buried in a
+     dropdown: every one of them belongs on the bar next to Warm-up and
+     Pronunciation Boxing, where the trainer can see it coming and reach
+     it in one tap. Any that is not wanted today is passed with Next
+     stage, or taken off the bar with Remove. */
+  const STANDING = ['connectors', 'prep', 'forbidden', 'picture'];
+
   const planned = ['warmup', 'harvest', 'pron', 'stage4']
     .concat((plan.extras || []).filter(x => x !== plan.stage4))
-    .concat(plan.stage4 === 'picture' || (plan.extras || []).includes('picture') ? [] : ['picture'])
+    .concat(STANDING.filter(s => s !== plan.stage4 && !(plan.extras || []).includes(s)))
     .concat(['feedback']);
   /* A drill added mid-session is remembered, so reopening the
      session does not silently drop it. */
   const saved = (record.data || {}).stage_list;
-  const stages = Array.isArray(saved) && saved.length ? withPicture(saved) : planned;
+  const stages = Array.isArray(saved) && saved.length ? withStanding(saved) : planned;
 
-  /* Sessions planned before it became a standing stage still get it,
-     rather than the trainer wondering where it went. */
-  function withPicture(list) {
-    if (list.includes('picture') || list.includes('stage4') && plan.stage4 === 'picture') return list;
-    const at = list.indexOf('feedback');
+  /* Sessions planned before these became standing stages still get
+     them, rather than the trainer wondering where they went. A stage
+     the trainer removed by hand stays removed. */
+  function withStanding(list) {
+    const dropped = (record.data || {}).stages_removed || [];
     const out = list.slice();
-    out.splice(at < 0 ? out.length : at, 0, 'picture');
+    const at = () => { const i = out.indexOf('feedback'); return i < 0 ? out.length : i; };
+    STANDING.forEach(s => {
+      if (out.includes(s) || dropped.includes(s)) return;
+      if (s === plan.stage4 && out.includes('stage4')) return;
+      out.splice(at(), 0, s);
+    });
     return out;
   }
 
@@ -163,6 +172,7 @@ function draw() {
         '<button class="timer-target" data-settarget title="Set your own length for this stage">' +
         'suggested ' + fmtTarget(m.target) + ' · edit</button></div>' +
       '<button class="btn ghost sm" data-adddrill title="Insert a drill after this stage">+ Drill</button>' +
+      '<button class="btn ghost sm" data-dropstage title="Take this stage off today\'s bar">− Remove</button>' +
       '<button class="themeBtn" data-theme-toggle title="Switch theme">☀</button>' +
       '<button class="btn ghost sm" data-back>Back</button>' +
       '<button class="btn" data-next>' + (S.idx === S.stages.length - 1 ? 'Finish' : 'Next stage') + '</button>' +
@@ -252,6 +262,21 @@ function draw() {
     await persist();
     draw();
     toast(mins === 'default' ? 'Back to the suggested length.' : 'This stage now runs to ' + mins + ' min.');
+  };
+
+  /* Nine stages on the bar is generous; a trainer who does not want one
+     today takes it off rather than tapping past it every session. It
+     stays off when the session is reopened. */
+  $('[data-dropstage]', bar).onclick = async () => {
+    if (stage === 'feedback' || S.stages.length <= 2) { toast('That one has to stay.', 'err'); return; }
+    if (!await confirmBox('Remove ' + m.title + '?', 'It comes off today\'s bar. Everything already entered is kept.', false)) return;
+    S.data.stages_removed = (S.data.stages_removed || []).concat([stage]);
+    S.stages.splice(S.idx, 1);
+    S.data.stage_list = S.stages;
+    S.idx = Math.min(S.idx, S.stages.length - 1);
+    await persist();
+    draw();
+    toast(m.title + ' removed.');
   };
 
   $('[data-next]', bar).onclick = () => advance(1);
