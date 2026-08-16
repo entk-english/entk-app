@@ -12,7 +12,7 @@ Paste this whole file into a new session to pick up exactly where the last one s
 | **Live site** | https://entk-english.github.io/entk-app/ |
 | **Repo** | https://github.com/entk-english/entk-app (public — Pages needs public on the free plan) |
 | **Branch** | `main` |
-| **Current build** | `b30` (shown at the bottom of the sign-in card) |
+| **Current build** | `b32` (shown at the bottom of the sign-in card) |
 | **Diagnostic page** | https://entk-english.github.io/entk-app/mic-check.html |
 
 ### Files
@@ -121,6 +121,27 @@ red over there, Reveal writes the answers into their boxes.
 each heading, a patterned prompt box, the stage bar redrawn as a route with a pulse on the
 current stage, and lift on buttons, chips and rows. All of it off under
 `prefers-reduced-motion`.
+
+## The drills (b32)
+
+Three more, all two-way — the trainee works on their own device and the trainer marks from
+theirs. Choose one as the quick round, tap them in *Extra rounds* when planning, or add one
+mid-session with **+ Drill**.
+
+- **Connector Chaining** — a situation on their screen and a set of connectors they must join
+  their ideas with. Their sentence arrives on the trainer's desk as they type, and any
+  connector they actually used lights up by itself. The answer to stump sentences.
+- **PREP Answer** — a question, and four boxes: point, reason, example, point again. The
+  trainer can send any one step back with *Again*, which turns that box red on their screen.
+- **The Forbidden Word** — the word appears on the trainee's screen with two near-miss words
+  also banned; they describe it until the trainer guesses. The trainer's side keeps the clock
+  and the tally of guesses and slips.
+
+**The trap these exposed.** The trainee's page rebuilds whenever the published payload
+changes, and every payload carries a timestamp — so publishing on each redraw rebuilt their
+page 1.5 seconds after every keystroke and wiped what they were typing. Publishing now
+happens only when the *content* changes, and the rebuild key ignores the timestamp. Any new
+two-way stage must keep both halves of that.
 
 ## The recogniser does not play the game (b30)
 

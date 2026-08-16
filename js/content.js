@@ -234,6 +234,195 @@ export const PICTURE_PROMPTS = {
 };
 
 /* -------------------------------------------------------------
+   DRILL — CONNECTOR CHAINING
+
+   The complaint this answers: beginners produce three short stumps
+   where one linked idea belongs. "Man found stick. Man hit with stick.
+   Man happy." Every stump is grammatical and the whole thing is
+   unusable. Forcing a connector forces the relationship between the
+   ideas to be stated, which is the thing that was missing.
+
+   The connectors are tiered because "in spite of" at A1 is a party
+   trick, not a skill; and "and" at C1 is not worth marking.
+   ------------------------------------------------------------- */
+
+export const CONNECTORS = {
+  A1: ['and', 'but', 'so', 'because', 'then'],
+  A2: ['but', 'so', 'because', 'after that', 'that is why'],
+  B1: ['so', 'but', 'because', 'although', 'however', 'therefore'],
+  B2: ['however', 'therefore', 'although', 'despite', 'as a result', 'whereas'],
+  C1: ['thus', 'hence', 'nevertheless', 'in spite of', 'consequently', 'whereas'],
+  C2: ['hence', 'conversely', 'albeit', 'notwithstanding', 'thereby', 'insofar as']
+};
+
+export const CONNECTOR_PROMPTS = {
+  A1: [
+    'You were late this morning. Say what happened.',
+    'You did not eat breakfast. Say why.',
+    'You liked a film. Say why.',
+    'You were tired last night. Say what you did.',
+    'You bought something new. Say why.'
+  ],
+  A2: [
+    'Your bus did not come. Say what you did next.',
+    'You changed your plan for the weekend. Say why.',
+    'You do not use one app any more. Say what happened.',
+    'You learned something the hard way. Tell it.',
+    'You said no to an invitation. Say why.'
+  ],
+  B1: [
+    'You disagreed with a decision at work or school. What happened?',
+    'Something cheap turned out to be expensive in the end. Tell it.',
+    'You changed your mind about a person or a place. Why?',
+    'A plan worked, but not the way you expected.',
+    'You had to choose between two good options.'
+  ],
+  B2: [
+    'A rule that exists for a good reason produced a bad result. Tell it.',
+    'You were right, but arguing it would have cost more than it was worth.',
+    'Something popular is, in your view, overrated. Make the case.',
+    'A small decision turned out to matter more than a big one.',
+    'You were persuaded out of a position you had held for years.'
+  ],
+  C1: [
+    'A policy achieved its stated aim and made things worse. Explain.',
+    'Two things you believe are in tension with each other. Hold both.',
+    'Defend a position you do not personally hold.',
+    'Something you were trained to do is now obsolete. What replaced it?',
+    'An exception that does not disprove the rule, and why.'
+  ],
+  C2: [
+    'A distinction that everyone draws and almost nobody can define.',
+    'Concede your opponent’s strongest point, then win anyway.',
+    'A field improved by abandoning its founding assumption.',
+    'The cost of being consistent, in a case where you paid it.',
+    'Something true, unfalsifiable, and therefore useless. Untangle it.'
+  ]
+};
+
+/* -------------------------------------------------------------
+   DRILL — PREP
+
+   Point, Reason, Example, Point again. A shape for an answer, so a
+   trainee who knows the words still has somewhere to put them. The
+   second Point is not padding: rephrasing it is where a learner
+   discovers whether they actually made one.
+   ------------------------------------------------------------- */
+
+export const PREP_STEPS = [
+  ['point', 'Point', 'Say it in one sentence.'],
+  ['reason', 'Reason', 'Why? One reason, or two.'],
+  ['example', 'Example', 'One real example — something that happened.'],
+  ['restate', 'Point again', 'Say the point again, in different words.']
+];
+
+export const PREP_QUESTIONS = {
+  A1: [
+    'What is the best day of the week?',
+    'Is it better to live in a city or a village?',
+    'Should children have phones?',
+    'What is the best food for breakfast?',
+    'Is it better to walk or to drive?'
+  ],
+  A2: [
+    'Why do you think you need a better salary?',
+    'Should school start later in the morning?',
+    'Is it better to travel alone or with friends?',
+    'Should everyone learn to cook?',
+    'Is it better to rent or to buy?'
+  ],
+  B1: [
+    'Why do you think you deserve a promotion?',
+    'Should companies allow working from home?',
+    'Is social media good for young people?',
+    'Should university be free?',
+    'Is it better to specialise or to be a generalist?'
+  ],
+  B2: [
+    'Should employers be allowed to monitor staff?',
+    'Is failure a better teacher than success?',
+    'Should voting be compulsory?',
+    'Does remote work damage a career?',
+    'Is expertise being devalued?'
+  ],
+  C1: [
+    'Should AI-written work be labelled as such?',
+    'Is meritocracy a coherent idea?',
+    'Should there be a limit on inherited wealth?',
+    'Does transparency always improve an institution?',
+    'Is optimism a strategy or a temperament?'
+  ],
+  C2: [
+    'Is scientific consensus an argument or an authority?',
+    'Should a democracy be able to vote away its own protections?',
+    'Is moral progress a real phenomenon or a narrative device?',
+    'Does regulation of a technology arrive too late by definition?',
+    'Is disagreement between experts evidence of anything?'
+  ]
+};
+
+/* -------------------------------------------------------------
+   DRILL — THE FORBIDDEN WORD
+
+   The trainee gets a word and describes it until the trainer guesses
+   it, without ever saying it — or the near-miss words listed with it.
+   It is a vocabulary drill wearing a game's clothes: the point is the
+   circumlocution, which is exactly what a learner does in real life
+   when the word will not come.
+   ------------------------------------------------------------- */
+
+export const FORBIDDEN_WORDS = {
+  A1: [
+    { word: 'umbrella', banned: ['rain', 'wet'] },
+    { word: 'kitchen', banned: ['cook', 'food'] },
+    { word: 'bicycle', banned: ['ride', 'wheels'] },
+    { word: 'teacher', banned: ['school', 'class'] },
+    { word: 'winter', banned: ['cold', 'snow'] },
+    { word: 'shoes', banned: ['feet', 'wear'] }
+  ],
+  A2: [
+    { word: 'passport', banned: ['travel', 'country'] },
+    { word: 'neighbour', banned: ['next', 'house'] },
+    { word: 'receipt', banned: ['shop', 'pay'] },
+    { word: 'alarm clock', banned: ['wake', 'morning'] },
+    { word: 'suitcase', banned: ['travel', 'clothes'] },
+    { word: 'library', banned: ['book', 'read'] }
+  ],
+  B1: [
+    { word: 'deadline', banned: ['time', 'finish'] },
+    { word: 'landlord', banned: ['rent', 'flat'] },
+    { word: 'interview', banned: ['job', 'questions'] },
+    { word: 'insurance', banned: ['pay', 'accident'] },
+    { word: 'commute', banned: ['work', 'travel'] },
+    { word: 'refund', banned: ['money', 'back'] }
+  ],
+  B2: [
+    { word: 'bureaucracy', banned: ['government', 'forms'] },
+    { word: 'burnout', banned: ['work', 'tired'] },
+    { word: 'compromise', banned: ['agree', 'middle'] },
+    { word: 'reputation', banned: ['people', 'think'] },
+    { word: 'loophole', banned: ['law', 'escape'] },
+    { word: 'shortlist', banned: ['job', 'candidates'] }
+  ],
+  C1: [
+    { word: 'nostalgia', banned: ['past', 'memory'] },
+    { word: 'precedent', banned: ['law', 'before'] },
+    { word: 'scapegoat', banned: ['blame', 'fault'] },
+    { word: 'threshold', banned: ['limit', 'door'] },
+    { word: 'incentive', banned: ['money', 'reward'] },
+    { word: 'stalemate', banned: ['chess', 'stuck'] }
+  ],
+  C2: [
+    { word: 'plausible deniability', banned: ['lie', 'blame'] },
+    { word: 'diminishing returns', banned: ['less', 'effort'] },
+    { word: 'survivorship bias', banned: ['success', 'data'] },
+    { word: 'moral hazard', banned: ['risk', 'insurance'] },
+    { word: 'false equivalence', banned: ['same', 'compare'] },
+    { word: 'institutional inertia', banned: ['slow', 'change'] }
+  ]
+};
+
+/* -------------------------------------------------------------
    FILLERS — tap-counted live during Stage 2
    ------------------------------------------------------------- */
 

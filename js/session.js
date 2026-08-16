@@ -13,6 +13,7 @@ import { UNSPLASH_ACCESS_KEY } from './config.js';
 import {
   WARMUP_FORMATS, WARMUPS, TOPICS, PRON_FALLBACK,
   WORD_FORMS, EXPANSIONS, EXPANSION_STEPS, PICTURE_QUERIES, PICTURE_PROMPTS,
+  CONNECTORS, CONNECTOR_PROMPTS, PREP_STEPS, PREP_QUESTIONS, FORBIDDEN_WORDS,
   FILLERS, ERROR_TYPES, LEVEL_LABEL, forLevel, pickOne
 } from './content.js';
 import { esc, el, $, $$, toast, modal, confirmBox, copyText, downloadText, fmtDate, mmss } from './ui.js';
@@ -20,7 +21,10 @@ import { esc, el, $, $$, toast, modal, confirmBox, copyText, downloadText, fmtDa
 const DRILL_NAMES = {
   wordform: 'Word Form Drill',
   expansion: 'Sentence Expansion',
-  picture: 'Picture Description'
+  picture: 'Picture Description',
+  connectors: 'Connector Chaining',
+  prep: 'PREP Answer',
+  forbidden: 'The Forbidden Word'
 };
 
 let S = null;          // live session state
@@ -103,6 +107,9 @@ const STAGE_META = {
   wordform: { title: 'Word Form Drill', target: 180, blurb: 'Noun, infinitive, past, adjective.' },
   expansion: { title: 'Sentence Expansion', target: 180, blurb: 'What, when, where, why — one at a time.' },
   picture: { title: 'Picture Description', target: 120, blurb: '60 to 90 seconds of description, then follow-ups.' },
+  connectors: { title: 'Connector Chaining', target: 180, blurb: 'Two ideas, one sentence. The connector states the relationship.' },
+  prep: { title: 'PREP Answer', target: 180, blurb: 'Point, reason, example, point again. A shape to put the words in.' },
+  forbidden: { title: 'The Forbidden Word', target: 150, blurb: 'They describe it, you guess it. They never say it.' },
   feedback: { title: 'Feedback Note', target: 90, blurb: 'Read it out, then send it to the trainee.' }
 };
 
@@ -192,7 +199,10 @@ function draw() {
     const options = [
       ['picture', 'Picture Description'],
       ['wordform', 'Word Form Drill'],
-      ['expansion', 'Sentence Expansion']
+      ['expansion', 'Sentence Expansion'],
+      ['connectors', 'Connector Chaining'],
+      ['prep', 'PREP Answer'],
+      ['forbidden', 'The Forbidden Word']
     ];
     const chosen = await modal(
       '<h2>Add a drill</h2><p class="sub">It slots in straight after the stage you are on.</p>' +
@@ -262,6 +272,9 @@ function draw() {
     wordform: stageWordForm,
     expansion: stageExpansion,
     picture: stagePicture,
+    connectors: stageConnectors,
+    prep: stagePrep,
+    forbidden: stageForbidden,
     feedback: stageFeedback
   }[stage] || (b => b.appendChild(el('<div class="empty">Unknown stage.</div>'))))(stageBody);
 
@@ -804,7 +817,273 @@ function stageQuickRound(body) {
   const kind = quickRoundKind();
   if (kind === 'expansion') return stageExpansion(body);
   if (kind === 'picture') return stagePicture(body);
+  if (kind === 'connectors') return stageConnectors(body);
+  if (kind === 'prep') return stagePrep(body);
+  if (kind === 'forbidden') return stageForbidden(body);
   return stageWordForm(body);
+}
+
+/* =============================================================
+   DRILL — CONNECTOR CHAINING
+
+   The trainee writes on their own device and it arrives here as they
+   type. The connectors they have actually used light up by themselves,
+   so the trainer is reading the sentence rather than hunting for the
+   word "although" in it.
+   ============================================================= */
+
+function stageConnectors(body) {
+  const prompts = forLevel(CONNECTOR_PROMPTS, S.trainee.level);
+  const bank = forLevel(CONNECTORS, S.trainee.level);
+  const store = S.data.extras.connectors = S.data.extras.connectors || { prompt: '', required: [], done: 0 };
+  if (!store.prompt) store.prompt = pickOne(prompts) || '';
+  if (!store.required.length) store.required = bank.slice(0, 3);
+
+  let text = '';
+
+  const card = el('<div class="card"></div>');
+  body.appendChild(card);
+
+  /* A connector counts as used when it appears as a whole word — "so"
+     must not be found inside "also". Multi-word ones are matched whole. */
+  const usedSet = () => {
+    const hay = ' ' + text.toLowerCase().replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ') + ' ';
+    return bank.filter(c => hay.indexOf(' ' + c.toLowerCase() + ' ') >= 0);
+  };
+
+  /* Publishing is what the trainee's page rebuilds on, so it happens
+     when the situation or the required connectors change — never on
+     every keystroke arriving from their device, which would rebuild the
+     box they are typing into. */
+  const pushToTrainee = () =>
+    publish({ kind: 'connectors', prompt: store.prompt, required: store.required, bank: bank });
+
+  function draw2() {
+    const used = usedSet();
+    card.innerHTML =
+      '<div class="prompt-box">' + esc(store.prompt) + '</div>' +
+      '<div class="row" style="margin-top:14px">' +
+        '<button class="btn ghost sm" data-newprompt>Another situation</button>' +
+        '<button class="btn ghost sm" data-editprompt>Write my own</button>' +
+        '<span class="spacer"></span>' +
+        '<span class="badge">' + store.done + ' done</span>' +
+      '</div>' +
+      '<div class="eyebrow" style="margin-top:18px">Connectors — tap to require, lit ones they have used</div>' +
+      '<div class="chips">' + bank.map(c =>
+        '<span class="chip' + (store.required.includes(c) ? ' gold' : '') + (used.includes(c) ? ' on' : '') +
+        '" data-c="' + esc(c) + '">' + esc(c) + '</span>').join('') + '</div>' +
+      '<div class="eyebrow" style="margin-top:18px">What they are writing</div>' +
+      '<div class="prompt-box small" id="c-text" style="text-align:left;min-height:84px">' +
+        (text ? esc(text) : '<span style="color:var(--muted)">Waiting for their device…</span>') + '</div>' +
+      '<div class="row" style="margin-top:14px">' +
+        '<button class="btn" data-accept>✓ Good — next situation</button>' +
+        '<button class="btn ghost" data-again>Say it again, longer</button>' +
+      '</div>';
+
+    $$('[data-c]', card).forEach(chip => chip.onclick = () => {
+      const c = chip.dataset.c;
+      store.required = store.required.includes(c)
+        ? store.required.filter(x => x !== c)
+        : store.required.concat([c]);
+      pushToTrainee();
+      draw2();
+      persist();
+    });
+    $('[data-newprompt]', card).onclick = () => { store.prompt = pickOne(prompts) || store.prompt; text = ''; nextRound(); };
+    $('[data-editprompt]', card).onclick = async () => {
+      const own = await modal(
+        '<h2>Your own situation</h2><textarea id="c-own" placeholder="Something that happened to them, in one line"></textarea>' +
+        '<div class="row" style="margin-top:12px"><button class="btn ghost" data-cancel>Cancel</button>' +
+        '<button class="btn" data-ok>Use it</button></div>',
+        (c2, close) => {
+          $('[data-ok]', c2).onclick = () => close($('#c-own', c2).value.trim());
+          $('[data-cancel]', c2).onclick = () => close(null);
+        });
+      if (own) { store.prompt = own; text = ''; nextRound(); }
+    };
+    $('[data-accept]', card).onclick = () => {
+      store.done++;
+      store.prompt = pickOne(prompts) || store.prompt;
+      text = '';
+      nextRound();
+      toast('Nice — new situation sent.');
+    };
+    $('[data-again]', card).onclick = () => {
+      if (link) link.send('fieldnote', { note: 'Longer, please — join those ideas with one of the lit connectors.' });
+      toast('Asked for a longer answer.');
+    };
+  }
+
+  function nextRound() {
+    if (link) link.send('fieldnext', {});
+    pushToTrainee();
+    draw2();
+    persist();
+  }
+
+  S.onLink = (msg) => {
+    if (msg.type !== 'fields') return;
+    text = (msg.answers && msg.answers.text) || '';
+    draw2();
+  };
+
+  pushToTrainee();
+  draw2();
+}
+
+/* =============================================================
+   DRILL — PREP ANSWER
+   ============================================================= */
+
+function stagePrep(body) {
+  const questions = forLevel(PREP_QUESTIONS, S.trainee.level);
+  const store = S.data.extras.prep = S.data.extras.prep || { question: '', done: 0 };
+  if (!store.question) store.question = pickOne(questions) || '';
+
+  let answers = {};
+
+  const card = el('<div class="card"></div>');
+  body.appendChild(card);
+
+  const pushToTrainee = () => publish({ kind: 'prep', question: store.question });
+
+  function draw2() {
+    card.innerHTML =
+      '<div class="prompt-box">' + esc(store.question) + '</div>' +
+      '<div class="row" style="margin-top:14px">' +
+        '<button class="btn ghost sm" data-newq>Another question</button>' +
+        '<button class="btn ghost sm" data-ownq>Ask my own</button>' +
+        '<span class="spacer"></span><span class="badge">' + store.done + ' answered</span>' +
+      '</div>' +
+      '<div class="list" style="margin-top:18px">' +
+        PREP_STEPS.map(([k, label, hint]) => {
+          const given = (answers[k] || '').trim();
+          return '<div class="item"><span class="badge ' + (given ? 'level' : '') + '">' + esc(label) + '</span>' +
+            '<div class="grow"><div class="title" style="font-weight:600">' +
+              (given ? esc(given) : '<span style="color:var(--muted);font-weight:400">' + esc(hint) + '</span>') +
+            '</div></div>' +
+            '<button class="btn ghost sm" data-again="' + k + '">Again</button></div>';
+        }).join('') +
+      '</div>' +
+      '<div class="row" style="margin-top:16px">' +
+        '<button class="btn" data-accept>✓ Good answer — next question</button>' +
+      '</div>';
+
+    $('[data-newq]', card).onclick = () => { store.question = pickOne(questions) || store.question; answers = {}; nextRound(); };
+    $('[data-ownq]', card).onclick = async () => {
+      const own = await modal(
+        '<h2>Your own question</h2><input id="p-own" placeholder="Why do you think you need a better salary?">' +
+        '<div class="row" style="margin-top:12px"><button class="btn ghost" data-cancel>Cancel</button>' +
+        '<button class="btn" data-ok>Ask it</button></div>',
+        (c2, close) => {
+          $('[data-ok]', c2).onclick = () => close($('#p-own', c2).value.trim());
+          $('[data-cancel]', c2).onclick = () => close(null);
+        });
+      if (own) { store.question = own; answers = {}; nextRound(); }
+    };
+    $$('[data-again]', card).forEach(b => b.onclick = () => {
+      const k = b.dataset.again;
+      const label = (PREP_STEPS.find(s => s[0] === k) || [])[1] || 'that part';
+      if (link) link.send('fieldflag', { key: k, note: label + ' again — sharpen it.' });
+      toast('Asked them to redo the ' + label.toLowerCase() + '.');
+    });
+    $('[data-accept]', card).onclick = () => {
+      store.done++;
+      store.question = pickOne(questions) || store.question;
+      answers = {};
+      nextRound();
+      toast('Next question sent.');
+    };
+  }
+
+  function nextRound() {
+    if (link) link.send('fieldnext', {});
+    pushToTrainee();
+    draw2();
+    persist();
+  }
+
+  S.onLink = (msg) => {
+    if (msg.type !== 'fields') return;
+    answers = msg.answers || {};
+    draw2();
+  };
+
+  pushToTrainee();
+  draw2();
+}
+
+/* =============================================================
+   DRILL — THE FORBIDDEN WORD
+
+   The word goes to the trainee's screen, not this one: they are the
+   one describing it. This side is the guesser, so it holds the word
+   too — a trainer who cannot get there needs to see what they are
+   failing to guess — plus the clock and the tally.
+   ============================================================= */
+
+function stageForbidden(body) {
+  const bank = forLevel(FORBIDDEN_WORDS, S.trainee.level);
+  const store = S.data.extras.forbidden = S.data.extras.forbidden || { done: [], got: 0, slipped: 0 };
+  let item = pickOne(bank.filter(w => !store.done.includes(w.word))) || pickOne(bank);
+
+  const card = el('<div class="card"></div>');
+  body.appendChild(card);
+  let ft = null;
+
+  function draw2() {
+    publish({ kind: 'forbidden', word: item.word, banned: item.banned || [] });
+    card.innerHTML =
+      '<div class="eyebrow">On their screen — they describe it, they must not say it</div>' +
+      '<div class="prompt-box">' + esc(item.word) + '</div>' +
+      '<p class="sub" style="margin:12px 0 0">Also banned: ' +
+        ((item.banned || []).map(b => '<b>' + esc(b) + '</b>').join(', ') || '—') + '</p>' +
+      '<div class="row" style="margin-top:16px">' +
+        '<button class="btn gold" data-clock>Start the clock</button>' +
+        '<div class="timer" id="f-clock" style="font-size:32px">' + mmss(forbiddenSeconds()) + '</div>' +
+        '<span class="spacer"></span>' +
+        '<span class="badge level">' + store.got + ' guessed</span>' +
+        '<span class="badge admin">' + store.slipped + ' slips</span>' +
+      '</div>' +
+      '<div class="row" style="margin-top:16px">' +
+        '<button class="btn" data-got>✓ I guessed it</button>' +
+        '<button class="btn danger" data-slip>✗ They said the word</button>' +
+        '<button class="btn ghost" data-skip>Skip this one</button>' +
+      '</div>';
+
+    $('[data-clock]', card).onclick = () => {
+      clearInterval(ft);
+      let left = forbiddenSeconds();
+      const clock = $('#f-clock', card);
+      const paint = () => {
+        clock.textContent = mmss(Math.max(0, left));
+        clock.className = 'timer' + (left <= 15 ? ' warn' : '');
+        if (left <= 0) clearInterval(ft);
+        left--;
+      };
+      paint();
+      ft = setInterval(paint, 1000);
+    };
+    $('[data-got]', card).onclick = () => { store.got++; next(); toast('Got it.'); };
+    $('[data-slip]', card).onclick = () => { store.slipped++; next(); toast('Said the word — next one.', 'err'); };
+    $('[data-skip]', card).onclick = () => next();
+  }
+
+  function next() {
+    if (!store.done.includes(item.word)) store.done.push(item.word);
+    const left = bank.filter(w => !store.done.includes(w.word));
+    item = pickOne(left.length ? left : bank);
+    clearInterval(ft);
+    draw2();
+    persist();
+  }
+
+  S.onLeave = () => clearInterval(ft);
+  draw2();
+}
+
+function forbiddenSeconds() {
+  return meta(S.stages[S.idx]).target || 60;
 }
 
 /* =============================================================

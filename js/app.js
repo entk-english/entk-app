@@ -500,7 +500,10 @@ async function editTraineeDialog(t) {
 const OPTIONAL_DRILLS = [
   { id: 'wordform', name: 'Word Form Drill', note: 'Base word into noun, infinitive, past and adjective forms.' },
   { id: 'expansion', name: 'Sentence Expansion Drill', note: 'Simple sentence, then add What, When, Where, Why.' },
-  { id: 'picture', name: 'Picture Description', note: 'Random quirky image, 60–90 seconds of description.' }
+  { id: 'picture', name: 'Picture Description', note: 'Random quirky image, 60–90 seconds of description.' },
+  { id: 'connectors', name: 'Connector Chaining', note: 'Two ideas joined with so, but, although, in spite of — the cure for stump sentences.' },
+  { id: 'prep', name: 'PREP Answer', note: 'Point, reason, example, point again. A shape for a real answer.' },
+  { id: 'forbidden', name: 'The Forbidden Word', note: 'They describe it, you guess it, they never say it.' }
 ];
 
 async function planDialog(t, sessions) {
@@ -675,6 +678,16 @@ const WF_FIELDS = [
 let wfGrid = null;
 let wfSendTimer = null;
 
+/* The PREP steps, in the order they are answered. Kept here rather than
+   imported so the trainee's page needs nothing from the trainer's
+   content bank beyond what the trainer publishes. */
+const PREP_FIELDS = [
+  ['point', 'Point', 'one sentence'],
+  ['reason', 'Reason', 'why'],
+  ['example', 'Example', 'something that happened'],
+  ['restate', 'Point again', 'different words']
+];
+
 function wireWordForm(grid) {
   wfGrid = grid;
   const send = () => {
@@ -707,6 +720,56 @@ function paintWordFormCheck(msg) {
   });
 }
 
+/* ---- the generic version, used by the newer drills ----
+   Any stage whose trainee side is "some boxes they type into" wires its
+   inputs through here: every keystroke goes up as `fields`, the trainer
+   sends `fieldnext` to clear and `fieldflag` to mark one box for redoing. */
+let fieldRoot = null;
+let fieldTimer = null;
+
+function wireFields(root) {
+  fieldRoot = root;
+  const send = () => {
+    if (!liveLink) return;
+    const answers = {};
+    $$('[data-f]', root).forEach(i => { answers[i.dataset.f] = i.value; });
+    liveLink.send('fields', { answers });
+  };
+  $$('[data-f]', root).forEach(input => {
+    input.addEventListener('input', () => {
+      clearTimeout(fieldTimer);
+      fieldTimer = setTimeout(send, 250);
+    });
+  });
+  send();
+}
+
+function flagField(msg) {
+  if (!fieldRoot || !document.body.contains(fieldRoot)) return;
+  const cell = $('[data-k="' + msg.key + '"]', fieldRoot);
+  if (!cell) return;
+  cell.className = 'formcell wrong';
+  const note = $('.ans', cell);
+  if (note) note.textContent = msg.note || 'again';
+  const input = $('[data-f]', cell);
+  if (input) input.focus();
+}
+
+function noteFields(msg) {
+  if (!fieldRoot || !document.body.contains(fieldRoot)) return;
+  const line = $('#field-note', fieldRoot);
+  if (line) line.textContent = msg.note || '';
+}
+
+function clearFields() {
+  if (!fieldRoot || !document.body.contains(fieldRoot)) return;
+  $$('[data-f]', fieldRoot).forEach(i => { i.value = ''; });
+  $$('.formcell', fieldRoot).forEach(c => { c.className = 'formcell'; });
+  $$('.ans', fieldRoot).forEach(a => { a.textContent = ''; });
+  const line = $('#field-note', fieldRoot);
+  if (line) line.textContent = '';
+}
+
 function clearWordForm() {
   if (!wfGrid || !document.body.contains(wfGrid)) return;
   $$('input[data-f]', wfGrid).forEach(i => { i.value = ''; });
@@ -733,6 +796,9 @@ function openLiveLink(sessionId) {
     if (msg.type === 'restart' && liveFrame) liveFrame.src = liveFrame.src;
     if (msg.type === 'wfcheck') paintWordFormCheck(msg);
     if (msg.type === 'wfnext') clearWordForm();
+    if (msg.type === 'fieldnext') clearFields();
+    if (msg.type === 'fieldflag') flagField(msg);
+    if (msg.type === 'fieldnote') noteFields(msg);
   });
 }
 
@@ -762,6 +828,9 @@ const LIVE_STAGE_LABEL = {
   wordform: 'Word forms',
   expansion: 'Sentence expansion',
   picture: 'Picture description',
+  connectors: 'Connector chaining',
+  prep: 'PREP answer',
+  forbidden: 'The forbidden word',
   feedback: 'Feedback'
 };
 
@@ -806,7 +875,13 @@ async function followLiveSession(host, trainee) {
       : ['warmup', 'harvest', 'pron', 'stage4', 'feedback'];
     const idx = Math.min(Math.max(0, d.stage_index || 0), stages.length - 1);
     const stage = stages[idx];
-    const words = (d.harvest && d.harvest.words) || [];
+    /* The word list the trainer published is the authority. Reading only
+       the harvest meant that a session where nothing was harvested — so
+       the trainer's screen fell back to a level list — left the trainee
+       with an empty list and therefore no game at all. */
+    const published = d.display && d.display.kind === 'pron' && Array.isArray(d.display.words)
+      ? d.display.words : null;
+    const words = (published && published.length ? published : (d.harvest && d.harvest.words)) || [];
 
     /* Relay the trainer's verdict into the running game before any
        redraw decision, so a hit is never lost to a rebuild. */
@@ -819,7 +894,11 @@ async function followLiveSession(host, trainee) {
 
     /* only rebuild when something actually changed, so an embedded
        game is not torn down and restarted every few seconds */
-    const key = stage + '|' + idx + '|' + words.join(',') + '|' + JSON.stringify(d.display || {});
+    /* The timestamp on the published payload changes on every save, and
+       rebuilding this page throws away whatever the trainee is halfway
+       through typing. Only the content counts towards the rebuild. */
+    const dspKey = JSON.stringify(Object.assign({}, d.display || {}, { at: 0 }));
+    const key = stage + '|' + idx + '|' + words.join(',') + '|' + dspKey;
     if (key !== lastKey) { liveFrame = null; }
     if (key === lastKey) return;
     lastKey = key;
@@ -860,13 +939,21 @@ async function followLiveSession(host, trainee) {
       }
     }
 
-    /* --- pronunciation: they play it --- */
-    else if (stage === 'pron' && words.length) {
-      host.appendChild(el('<p class="sub">Say each word out loud. Your trainer decides if it counts.</p>'));
-      const frame = el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
-        encodeURIComponent(b64({ w: words.slice(0, 20), v: [] })) + '"></iframe>');
-      host.appendChild(frame);
-      liveFrame = frame;
+    /* --- pronunciation: this is their game, not a status card ---
+       They fight the boss, their microphone records the attempt and
+       plays it back to them. The trainer only watches a mirror of it
+       and calls the verdict. */
+    else if (stage === 'pron') {
+      if (!words.length) {
+        host.appendChild(el('<div class="empty">Your trainer is picking the words…</div>'));
+      } else {
+        host.appendChild(el('<p class="sub">Tap the microphone and say the word. ' +
+          'Press <b>▶ My recording</b> to hear yourself back. Your trainer calls the hit.</p>'));
+        const frame = el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
+          encodeURIComponent(b64({ w: words.slice(0, 20), v: [] })) + '"></iframe>');
+        host.appendChild(frame);
+        liveFrame = frame;
+      }
     }
 
     /* --- word forms: their four boxes, typed on their own device --- */
@@ -882,6 +969,53 @@ async function followLiveSession(host, trainee) {
       host.appendChild(el('<p class="sub" style="text-align:center;margin-top:12px">' +
         'Type all four forms. Your trainer marks them from their screen.</p>'));
       wireWordForm(grid);
+    }
+
+    /* --- connectors: one box, and the words they must join with --- */
+    else if (stage === 'connectors' || (stage === 'stage4' && dsp.kind === 'connectors')) {
+      host.appendChild(el('<div class="prompt-box">' + esc(dsp.prompt || 'Waiting for your situation…') + '</div>'));
+      const need = dsp.required || [];
+      if (need.length) {
+        host.appendChild(el('<p class="sub" style="text-align:center;margin:14px 0 6px">Join your ideas using at least one of these</p>'));
+        host.appendChild(el('<div class="chips" style="justify-content:center">' +
+          need.map(c => '<span class="chip gold static">' + esc(c) + '</span>').join('') + '</div>'));
+      }
+      const box = el('<div style="margin-top:16px">' +
+        '<div class="formcell" data-k="text">' +
+        '<textarea data-f="text" rows="4" placeholder="Two ideas or more, in one linked sentence…"></textarea>' +
+        '<div class="ans"></div></div>' +
+        '<p class="sub" id="field-note" style="text-align:center;margin-top:10px"></p></div>');
+      host.appendChild(box);
+      wireFields(box);
+    }
+
+    /* --- PREP: the four steps of the answer, in order --- */
+    else if (stage === 'prep' || (stage === 'stage4' && dsp.kind === 'prep')) {
+      host.appendChild(el('<div class="prompt-box">' + esc(dsp.question || 'Waiting for your question…') + '</div>'));
+      const grid = el('<div style="margin-top:18px">' +
+        PREP_FIELDS.map(([k, label, hint]) =>
+          '<div class="formcell" data-k="' + k + '" style="margin-bottom:10px">' +
+          '<label style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;font-weight:700">' +
+          label + ' — ' + hint + '</label>' +
+          '<input data-f="' + k + '" autocomplete="off">' +
+          '<div class="ans"></div></div>').join('') +
+        '<p class="sub" id="field-note" style="text-align:center"></p></div>');
+      host.appendChild(grid);
+      wireFields(grid);
+    }
+
+    /* --- forbidden word: their word, and what they may not say --- */
+    else if (stage === 'forbidden' || (stage === 'stage4' && dsp.kind === 'forbidden')) {
+      host.appendChild(el('<p class="sub" style="text-align:center">Describe this until your trainer guesses it. ' +
+        'Never say the word itself.</p>'));
+      host.appendChild(el('<div class="prompt-box">' + esc(dsp.word || '…') + '</div>'));
+      const banned = dsp.banned || [];
+      if (banned.length) {
+        host.appendChild(el('<p class="sub" style="text-align:center;margin:14px 0 6px">These are banned too</p>'));
+        host.appendChild(el('<div class="chips" style="justify-content:center">' +
+          banned.map(b => '<span class="chip static" style="background:var(--danger-wash);border-color:var(--danger-edge);color:var(--danger)">' +
+            esc(b) + '</span>').join('') + '</div>'));
+      }
     }
 
     /* --- expansion: the sentence growing as they add to it --- */
