@@ -306,7 +306,14 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var
 }
 .timer.over { color: var(--gold); }
 .timer.warn { color: var(--danger); }
-.timer-target { font-size: 12px; color: var(--muted); text-align: center; margin-top: 3px; }
+/* A label until you hover it, then plainly a control: the suggested
+   length is the trainer's to change, one stage at a time. */
+.timer-target {
+  font-size: 12px; color: var(--muted); text-align: center; margin-top: 3px;
+  display: block; width: 100%; background: none; font-family: inherit;
+  border: 1px solid transparent; border-radius: 7px; padding: 2px 6px; cursor: pointer;
+}
+.timer-target:hover { color: var(--accent); border-color: var(--accent-edge); background: var(--accent-wash); }
 
 .stage-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
 .stage-head h1 { font-size: 28px; }

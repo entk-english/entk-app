@@ -15,7 +15,7 @@ import {
   WORD_FORMS, EXPANSIONS, EXPANSION_STEPS, PICTURE_QUERIES, PICTURE_PROMPTS,
   FILLERS, ERROR_TYPES, LEVEL_LABEL, forLevel, pickOne
 } from './content.js';
-import { esc, el, $, $$, toast, modal, confirmBox, copyText, downloadText, fmtDate } from './ui.js';
+import { esc, el, $, $$, toast, modal, confirmBox, copyText, downloadText, fmtDate, mmss } from './ui.js';
 
 const DRILL_NAMES = {
   wordform: 'Word Form Drill',
@@ -35,13 +35,27 @@ export async function runSession(root, sessionId, backToApp) {
   const history = sessions.filter(s => s.trainee_id === record.trainee_id && s.id !== sessionId && s.ended_at);
 
   const plan = record.plan || {};
+  /* Picture Description is a stage in its own right, not something
+     buried in a dropdown: it belongs on the bar next to Warm-up and
+     Pronunciation Boxing, where the trainer can see it coming. */
   const planned = ['warmup', 'harvest', 'pron', 'stage4']
     .concat((plan.extras || []).filter(x => x !== plan.stage4))
+    .concat(plan.stage4 === 'picture' || (plan.extras || []).includes('picture') ? [] : ['picture'])
     .concat(['feedback']);
   /* A drill added mid-session is remembered, so reopening the
      session does not silently drop it. */
   const saved = (record.data || {}).stage_list;
-  const stages = Array.isArray(saved) && saved.length ? saved : planned;
+  const stages = Array.isArray(saved) && saved.length ? withPicture(saved) : planned;
+
+  /* Sessions planned before it became a standing stage still get it,
+     rather than the trainer wondering where it went. */
+  function withPicture(list) {
+    if (list.includes('picture') || list.includes('stage4') && plan.stage4 === 'picture') return list;
+    const at = list.indexOf('feedback');
+    const out = list.slice();
+    out.splice(at < 0 ? out.length : at, 0, 'picture');
+    return out;
+  }
 
   S = {
     root, record, trainee, history, plan, stages, backToApp,
@@ -61,6 +75,8 @@ export async function runSession(root, sessionId, backToApp) {
   /* Reopening an unfinished session returns the trainer to the
      stage they left, not back to the warm-up. */
   S.idx = Math.min(Math.max(0, S.data.stage_index || 0), stages.length - 1);
+  S.data.stage_list = stages;
+  S.data.targets = S.data.targets || {};   // the trainer's own minutes per stage
 
   /* Re-entering a session must not stack a second listener or leave
      the previous stage clock running. */
@@ -98,11 +114,24 @@ function quickRoundKind() {
 }
 
 function meta(stage) {
+  let out;
   if (stage === 'stage4') {
     const kind = quickRoundKind();
-    return Object.assign({}, STAGE_META[kind], { title: DRILL_NAMES[kind] });
+    out = Object.assign({}, STAGE_META[kind], { title: DRILL_NAMES[kind] });
+  } else {
+    out = Object.assign({}, STAGE_META[stage] || { title: stage, target: 120, blurb: '' });
   }
-  return STAGE_META[stage] || { title: stage, target: 120, blurb: '' };
+  /* The suggested length is a default, not a rule. A trainer who wants
+     to give this one more room sets their own, and it is remembered
+     with the session. */
+  const own = S && S.data && S.data.targets && S.data.targets[stage];
+  if (own) out.target = own;
+  return out;
+}
+
+function fmtTarget(seconds) {
+  const m = seconds / 60;
+  return (m < 1 ? Math.round(seconds) + ' sec' : (Math.round(m * 10) / 10) + ' min');
 }
 
 /* ---------------- shell ---------------- */
@@ -121,7 +150,8 @@ function draw() {
         '<span class="step ' + (i < S.idx ? 'done' : i === S.idx ? 'now' : '') + '">' +
         (i + 1) + '. ' + esc(meta(s).title) + '</span>').join('') + '</div>' +
       '<div><div class="timer" id="clock">00:00</div>' +
-        '<div class="timer-target">suggested ' + Math.round(m.target / 60) + ' min</div></div>' +
+        '<button class="timer-target" data-settarget title="Set your own length for this stage">' +
+        'suggested ' + fmtTarget(m.target) + ' · edit</button></div>' +
       '<button class="btn ghost sm" data-adddrill title="Insert a drill after this stage">+ Drill</button>' +
       '<button class="themeBtn" data-theme-toggle title="Switch theme">☀</button>' +
       '<button class="btn ghost sm" data-back>Back</button>' +
@@ -180,6 +210,35 @@ function draw() {
     await persist();
     draw();
     toast('Added — it is the next stage.');
+  };
+
+  /* Any stage can be given a different length, this session only. */
+  $('[data-settarget]', bar).onclick = async () => {
+    const mins = await modal(
+      '<h2>How long for ' + esc(m.title) + '?</h2>' +
+      '<p class="sub">Only the suggestion changes colour — the clock never interrupts you.</p>' +
+      '<div class="chips" style="margin-bottom:16px">' +
+        [1, 2, 3, 5, 8, 10, 15].map(n => '<span class="chip gold" data-min="' + n + '">' + n + ' min</span>').join('') +
+      '</div>' +
+      '<div class="field"><label>Or type it, in minutes</label>' +
+      '<input id="t-min" type="number" min="1" max="90" step="1" value="' + Math.round(m.target / 60) + '"></div>' +
+      '<div class="row"><button class="btn ghost" data-cancel>Cancel</button>' +
+      '<button class="btn" data-ok>Set</button>' +
+      '<button class="btn ghost" data-reset>Back to default</button></div>',
+      (card, close) => {
+        $$('[data-min]', card).forEach(c => c.onclick = () => close(Number(c.dataset.min)));
+        $('[data-ok]', card).onclick = () => close(Number($('#t-min', card).value));
+        $('[data-reset]', card).onclick = () => close('default');
+        $('[data-cancel]', card).onclick = () => close(null);
+      }
+    );
+    if (mins === null) return;
+    if (mins === 'default') delete S.data.targets[stage];
+    else if (mins > 0) S.data.targets[stage] = Math.round(mins * 60);
+    else return;
+    await persist();
+    draw();
+    toast(mins === 'default' ? 'Back to the suggested length.' : 'This stage now runs to ' + mins + ' min.');
   };
 
   $('[data-next]', bar).onclick = () => advance(1);
@@ -918,6 +977,12 @@ function stageExpansion(body) {
    DRILL — PICTURE DESCRIPTION
    ============================================================= */
 
+/* The drill runs to whatever this stage has been set to, so changing
+   the length in the bar changes the clock the trainee is talking against. */
+function pictureSeconds() {
+  return meta(S.stages[S.idx]).target || 90;
+}
+
 function stagePicture(body) {
   const store = S.data.extras.picture = S.data.extras.picture || { url: '', credit: '', notes: '' };
   const prompts = forLevel(PICTURE_PROMPTS, S.trainee.level);
@@ -925,8 +990,8 @@ function stagePicture(body) {
   const card = el('<div class="card">' +
     '<div class="row" style="margin-bottom:14px">' +
       '<button class="btn" data-new>New picture</button>' +
-      '<button class="btn gold" data-talk>Start 90 seconds</button>' +
-      '<div class="timer" id="p-clock" style="font-size:32px">01:30</div>' +
+      '<button class="btn gold" data-talk>Start the clock</button>' +
+      '<div class="timer" id="p-clock" style="font-size:32px">' + mmss(pictureSeconds()) + '</div>' +
       '<span class="spacer"></span><span class="sub" id="p-credit" style="margin:0"></span>' +
     '</div>' +
     '<div id="p-holder"><div class="empty">Tap “New picture” to pull one.</div></div>' +
@@ -979,7 +1044,9 @@ function stagePicture(body) {
   let pt = null;
   $('[data-talk]', card).onclick = () => {
     clearInterval(pt);
-    let left = 90;
+    /* However long this stage has been set to run — edit it from the
+       "suggested … edit" line in the bar above. */
+    let left = pictureSeconds();
     const clock = $('#p-clock', card);
     const paint = () => {
       clock.textContent = String(Math.floor(Math.max(0, left) / 60)).padStart(2, '0') + ':' + String(Math.max(0, left) % 60).padStart(2, '0');
