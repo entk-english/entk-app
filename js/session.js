@@ -219,6 +219,15 @@ async function advance(direction) {
   draw();
 }
 
+/* What the trainee should be looking at right now. The trainer's own
+   screen holds inputs and controls; this is the part that is theirs. */
+let publishTimer = null;
+function publish(display) {
+  S.data.display = Object.assign({ at: Date.now() }, display);
+  clearTimeout(publishTimer);
+  publishTimer = setTimeout(() => { persist(); }, 350);
+}
+
 async function persist() {
   S.data.stage_index = S.idx;
   try { await Store.updateSession(S.record.id, { data: S.data }); }
@@ -272,11 +281,12 @@ function stageWarmup(body) {
     const bank = forLevel(WARMUPS[format], level).concat(mine);
     S.data.warmup = { id: format, format: def.name };
 
+    const shown = pickOne(bank) || '';
     let promptHTML;
     if (format === 'chain') {
-      promptHTML = 'Start the chain with: <b style="color:var(--accent)">' + esc(pickOne(bank)) + '</b>';
+      promptHTML = 'Start the chain with: <b style="color:var(--accent)">' + esc(shown) + '</b>';
     } else {
-      promptHTML = esc(pickOne(bank));
+      promptHTML = esc(shown);
     }
 
     card.innerHTML =
@@ -298,7 +308,9 @@ function stageWarmup(body) {
           ).join('') + '</div>'
         : '');
 
-    $$('[data-f]', card).forEach(c => c.onclick = () => { format = c.dataset.f; drawFormat(); });
+    publish({ kind: 'warmup', format: def.name, hint: def.hint, prompt: shown });
+
+    $('[data-f]', card).forEach(c => c.onclick = () => { format = c.dataset.f; drawFormat(); });
     $('[data-again]', card).onclick = drawFormat;
 
     const addOwn = () => {
@@ -359,11 +371,16 @@ function stageHarvest(body) {
     chip.onclick = () => { $('#h-topic', card).value = t; h.topic = t; };
     $('#h-stretch', card).appendChild(chip);
   });
-  $('#h-topic', card).addEventListener('input', e => { h.topic = e.target.value; });
+  $('#h-topic', card).addEventListener('input', e => {
+    h.topic = e.target.value;
+    publish({ kind: 'harvest', topic: h.topic, running: false });
+  });
+  publish({ kind: 'harvest', topic: h.topic, running: false });
 
   /* 60 second speaking countdown, entirely separate from the stage clock */
   let talkTimer = null;
   $('#h-start', card).onclick = () => {
+    publish({ kind: 'harvest', topic: h.topic, running: true, startedAt: Date.now() });
     clearInterval(talkTimer);
     const clock = $('#h-clock', card);
     let left = 60;
@@ -491,6 +508,7 @@ function stagePron(body) {
      is live, and the verdict buttons that land the hit over there. */
   S.data.pron = Object.assign({}, S.data.pron, { words });
   S.data.control = S.data.control || { seq: 0, verdict: null, wordIndex: 0 };
+  publish({ kind: 'pron', words: words });
 
   const panel = el(
     '<div class="card">' +
@@ -617,6 +635,7 @@ function stageWordForm(body) {
   ];
 
   function drawItem() {
+    publish({ kind: 'wordform', base: item.base });
     card.innerHTML =
       '<div class="prompt-box">' + esc(item.base.charAt(0).toUpperCase() + item.base.slice(1)) + '</div>' +
       '<div class="formgrid" style="margin-top:18px">' +
@@ -699,8 +718,10 @@ function stageExpansion(body) {
       '<div class="row" style="margin-top:14px"><button class="btn ghost sm" data-example>Show a model answer</button></div>' +
       '<div id="ex-model"></div>';
 
-    $$('[data-s]', card).forEach(i => i.addEventListener('input', e => {
+    publish({ kind: 'expansion', base: store.base, steps: store.steps });
+    $('[data-s]', card).forEach(i => i.addEventListener('input', e => {
       store.steps[e.target.dataset.s] = e.target.value;
+      publish({ kind: 'expansion', base: store.base, steps: store.steps });
     }));
     $('#ex-base', card).addEventListener('input', e => { store.base = e.target.value; });
     $('[data-shuffle]', card).onclick = () => {
@@ -752,6 +773,7 @@ function stagePicture(body) {
 
   function show(url, credit) {
     store.url = url; store.credit = credit || '';
+    publish({ kind: 'picture', url: url, prompts: prompts });
     $('#p-holder', card).innerHTML = '<img class="picture-frame" src="' + esc(url) + '" alt="">';
     $('#p-credit', card).textContent = credit || '';
     persist();
@@ -858,6 +880,7 @@ function stageFeedback(body) {
     fb.focus = $('#f-focus', inputs).value;
     fb.text = buildNote();
     $('#fout', out).textContent = fb.text;
+    publish({ kind: 'feedback', text: fb.text });
   };
   paint();
 

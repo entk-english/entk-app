@@ -624,6 +624,7 @@ async function viewMyHistory(body) {
 let liveSessionOpen = false;
 let liveFrame = null;
 let lastMarkSeq = 0;
+let liveClock = null;
 
 /* The dedicated page: the trainee lands on whatever stage the trainer
    is on, and plays the game on their own device. */
@@ -705,43 +706,92 @@ async function followLiveSession(host, trainee) {
 
     /* only rebuild when something actually changed, so an embedded
        game is not torn down and restarted every few seconds */
-    const key = stage + '|' + idx + '|' + words.join(',') + '|' + ((d.harvest && d.harvest.topic) || '');
+    const key = stage + '|' + idx + '|' + words.join(',') + '|' + JSON.stringify(d.display || {});
     if (key !== lastKey) { liveFrame = null; }
     if (key === lastKey) return;
     lastKey = key;
 
     host.innerHTML = '';
+    const dsp = d.display || {};
+
     host.appendChild(el(
-      '<div class="card"><div class="row between">' +
-        '<div><div class="eyebrow" style="color:var(--accent)">● Session live now</div>' +
-        '<h2 style="margin:4px 0 0">' + esc(LIVE_STAGE_LABEL[stage] || stage) + '</h2>' +
-        '<p class="sub" style="margin:4px 0 0">Stage ' + (idx + 1) + ' of ' + stages.length + '</p></div>' +
-        (location.hash.indexOf('live') < 0
-          ? '<button class="btn" data-follow>Follow along</button>'
-          : '<span class="badge level">you are following</span>') +
+      '<div class="card tight"><div class="row between">' +
+        '<div><div class="eyebrow" style="color:var(--accent)">● Live · stage ' + (idx + 1) + ' of ' + stages.length + '</div>' +
+        '<h2 style="margin:3px 0 0">' + esc(LIVE_STAGE_LABEL[stage] || stage) + '</h2></div>' +
       '</div></div>'
     ));
-    const jump = $('[data-follow]', host);
-    if (jump) jump.onclick = () => { location.hash = '#/live'; };
 
-    if (stage === 'harvest' && d.harvest && d.harvest.topic) {
-      host.appendChild(el('<div class="prompt-box">' + esc(d.harvest.topic) + '</div>'));
+    /* --- warm-up: the prompt, big enough to answer from --- */
+    if (stage === 'warmup') {
+      host.appendChild(el('<div class="prompt-box">' + esc(dsp.prompt || 'Your trainer is choosing a question…') + '</div>'));
+      if (dsp.format) host.appendChild(el('<p class="sub" style="text-align:center;margin-top:12px">' + esc(dsp.format) + '</p>'));
     }
 
-    if (stage === 'pron' && words.length) {
+    /* --- free talk: the topic, and their own sixty seconds --- */
+    else if (stage === 'harvest') {
+      host.appendChild(el('<div class="prompt-box">' + esc(dsp.topic || d.harvest && d.harvest.topic || 'Waiting for your topic…') + '</div>'));
+      host.appendChild(el('<p class="sub" style="text-align:center;margin-top:14px">Talk for one minute without stopping. Do not worry about mistakes.</p>'));
+      if (dsp.running && dsp.startedAt) {
+        const clock = el('<div class="timer" style="text-align:center;font-size:56px;margin-top:10px">01:00</div>');
+        host.appendChild(clock);
+        clearInterval(liveClock);
+        const paintClock = () => {
+          const left = Math.max(0, 60 - Math.round((Date.now() - dsp.startedAt) / 1000));
+          clock.textContent = '00:' + String(left).padStart(2, '0');
+          clock.className = 'timer' + (left <= 10 ? ' warn' : '');
+          if (left <= 0) clearInterval(liveClock);
+        };
+        paintClock();
+        liveClock = setInterval(paintClock, 500);
+      }
+    }
+
+    /* --- pronunciation: they play it --- */
+    else if (stage === 'pron' && words.length) {
       host.appendChild(el('<p class="sub">Say each word out loud. Your trainer decides if it counts.</p>'));
       const frame = el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
         encodeURIComponent(b64({ w: words.slice(0, 20), v: [] })) + '"></iframe>');
       host.appendChild(frame);
       liveFrame = frame;
-    } else if (words.length) {
-      host.appendChild(el('<div class="card tight"><div class="eyebrow">Words from today</div><div class="chips">' +
-        words.map(w => '<span class="chip static">' + esc(w) + '</span>').join('') + '</div></div>'));
     }
 
-    if (stage === 'feedback' && d.feedback && d.feedback.text) {
-      host.appendChild(el('<div class="card"><h2>Today\'s note</h2><div class="feedback-out">' +
-        esc(d.feedback.text) + '</div></div>'));
+    /* --- word forms: the base word and the four boxes to say --- */
+    else if (stage === 'wordform' || (stage === 'stage4' && dsp.kind === 'wordform')) {
+      host.appendChild(el('<div class="prompt-box">' + esc((dsp.base || '…').toUpperCase()) + '</div>'));
+      host.appendChild(el('<div class="formgrid" style="margin-top:18px">' +
+        ['Noun', 'Infinitive', 'Past', 'Adjective / -ing'].map(l =>
+          '<div class="card tight" style="text-align:center"><div class="eyebrow">' + l + '</div>' +
+          '<div style="font-size:22px;color:var(--muted)">?</div></div>').join('') + '</div>'));
+      host.appendChild(el('<p class="sub" style="text-align:center;margin-top:12px">Say all four forms out loud.</p>'));
+    }
+
+    /* --- expansion: the sentence growing as they add to it --- */
+    else if (stage === 'expansion' || (stage === 'stage4' && dsp.kind === 'expansion')) {
+      host.appendChild(el('<div class="prompt-box">' + esc(dsp.base || '…') + '</div>'));
+      const steps = dsp.steps || {};
+      host.appendChild(el('<div class="list" style="margin-top:16px">' +
+        ['What', 'When', 'Where', 'Why'].map(k =>
+          '<div class="item"><span class="badge ' + (steps[k] ? 'level' : '') + '">' + k + '</span>' +
+          '<div class="grow">' + esc(steps[k] || 'add this next') + '</div></div>').join('') + '</div>'));
+    }
+
+    /* --- picture: the image, large --- */
+    else if (stage === 'picture' || (stage === 'stage4' && dsp.kind === 'picture')) {
+      if (dsp.url) host.appendChild(el('<img class="picture-frame" src="' + esc(dsp.url) + '" alt="">'));
+      else host.appendChild(el('<div class="empty">Your trainer is choosing a picture…</div>'));
+      host.appendChild(el('<p class="sub" style="text-align:center;margin-top:12px">Describe what you can see for about a minute.</p>'));
+    }
+
+    /* --- feedback: today's note --- */
+    else if (stage === 'feedback') {
+      const text = (dsp.text) || (d.feedback && d.feedback.text) || '';
+      host.appendChild(text
+        ? el('<div class="card"><h2>Today&#39;s note</h2><div class="feedback-out">' + esc(text) + '</div></div>')
+        : el('<div class="empty">Your trainer is writing your note…</div>'));
+    }
+
+    else {
+      host.appendChild(el('<div class="empty">Listen to your trainer for this part.</div>'));
     }
   };
 
