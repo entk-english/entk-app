@@ -329,7 +329,8 @@ async function advance(direction) {
   if (S.onLeave) { try { S.onLeave(); } catch (e) { /* a stage hook must never block the session */ } S.onLeave = null; }
   if (next >= S.stages.length) { await finish(); return; }
   S.idx = next;
-  await persist();
+  persist();
+  await flush();          // a stage change is worth a write of its own
   draw();
 }
 
@@ -339,17 +340,46 @@ let publishTimer = null;
 function publish(display) {
   S.data.display = Object.assign({ at: Date.now() }, display);
   /* Down the wire immediately, so their screen turns over at the same
-     moment yours does; the database write follows and is what a trainee
-     joining late or reloading reads. This is also why the poll on their
-     side can be slow — the wire, not the poll, is what makes it feel
-     live, and a slow poll is what keeps a room full of trainees from
-     hammering the database. */
+     moment yours does. The write that follows goes to the `live`
+     column — a few hundred bytes — and is what a trainee who reloads or
+     joins late reads. The whole record is not touched. */
   if (link) link.send('display', { display: S.data.display, idx: S.idx, stages: S.stages });
   clearTimeout(publishTimer);
-  publishTimer = setTimeout(() => { persist(); }, 350);
+  publishTimer = setTimeout(pushLive, 250);
 }
 
-async function persist() {
+async function pushLive() {
+  if (!S) return;
+  try {
+    const ok = await Store.updateLive(S.record.id, {
+      display: S.data.display, stage_index: S.idx, stage_list: S.stages, at: Date.now()
+    });
+    /* No live column on this project yet: the display still has to
+       reach a trainee who reloads, so fall back to the record. */
+    if (!ok) persist();
+  } catch (e) { persist(); }
+}
+
+/* The full record is the slow half: harvested words, every drill's
+   answers, recording paths, the note. It was being rewritten on every
+   mark and every keystroke, which is most of what three people in a
+   lesson could already feel. It is now coalesced — at most one write a
+   second and a half — and flushed outright at the moments that matter:
+   changing stage, leaving, finishing. */
+let persistTimer = null;
+let persistPending = false;
+
+function persist() {
+  persistPending = true;
+  if (persistTimer) return Promise.resolve();
+  persistTimer = setTimeout(() => { persistTimer = null; flush(); }, 1500);
+  return Promise.resolve();
+}
+
+async function flush() {
+  if (!S || !persistPending) return;
+  persistPending = false;
+  clearTimeout(persistTimer); persistTimer = null;
   S.data.stage_index = S.idx;
   try { await Store.updateSession(S.record.id, { data: S.data }); }
   catch (e) { toast('Could not save: ' + e.message, 'err'); }
@@ -357,7 +387,10 @@ async function persist() {
 
 async function finish() {
   S.data.feedback.text = buildNote();
-  await Store.updateSession(S.record.id, { data: S.data, ended_at: new Date().toISOString() });
+  clearTimeout(persistTimer); persistTimer = null; persistPending = false;
+  await Store.updateSession(S.record.id, {
+    data: S.data, live: {}, ended_at: new Date().toISOString()
+  });
   cleanup();
   toast('Session saved.');
   location.hash = '#/trainee/' + S.trainee.id;
@@ -368,6 +401,15 @@ function cleanup() {
   clearInterval(tick);
   window.removeEventListener('message', onGameMessage);
   if (link) { link.close(); link = null; }
+}
+
+/* Anything still coalesced is written before the tab goes away, so a
+   closed laptop never costs the trainer the last thing they typed. */
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => { if (S && persistPending) flush(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && S && persistPending) flush();
+  });
 }
 
 /* =============================================================

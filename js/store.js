@@ -440,16 +440,74 @@ Store.createSession = async function ({ trainee_id, trainer_id, plan }) {
     ended_at: null,
     plan: plan || {},
     data: {},
+    live: {},
     created_at: new Date().toISOString()
   };
   if (Store.mode === 'local') {
     const rows = read(LS.sessions); rows.push(row); write(LS.sessions, rows);
     return row;
   }
-  const { id, created_at, ...insert } = row;
+  /* `live` is left to the column default, so creating a session still
+     works on a project where supabase-live-column.sql has not been run. */
+  const { id, created_at, live, ...insert } = row;
   const { data, error } = await Store.sb.from('sessions').insert(insert).select().single();
   if (error) throw new Error(error.message);
   return data;
+};
+
+/* The trainee's live view asks this and nothing else: the newest
+   unfinished session for one trainee, and only the columns that decide
+   what is on their screen. `data` is deliberately absent — it is the
+   large, slow-changing half, and pulling it every few seconds for every
+   trainee in the building is what made a room of three feel like a room
+   of thirty. */
+Store.liveSession = async function (traineeId) {
+  if (Store.mode === 'local') {
+    const rows = read(LS.sessions)
+      .filter(s => s.trainee_id === traineeId && !s.ended_at)
+      .sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''));
+    return rows[0] || null;
+  }
+  /* supabase-live-column.sql may not have been run yet. The first
+     failure says so, and everything falls back to the old whole-record
+     path rather than leaving the trainee staring at nothing. */
+  if (!Store.noLiveColumn) {
+    const { data, error } = await Store.sb
+      .from('sessions')
+      .select('id,trainee_id,started_at,ended_at,live')
+      .eq('trainee_id', traineeId)
+      .is('ended_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1);
+    if (!error) return (data && data[0]) || null;
+    Store.noLiveColumn = true;
+  }
+  const { data, error } = await Store.sb
+    .from('sessions')
+    .select('*')
+    .eq('trainee_id', traineeId)
+    .is('ended_at', null)
+    .order('started_at', { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data && data[0]) || null;
+};
+
+/* The small half, written often. Kept separate from updateSession so a
+   fast-moving stage never rewrites the whole record. */
+Store.updateLive = async function (id, live) {
+  if (Store.mode === 'local') {
+    const rows = read(LS.sessions);
+    const i = rows.findIndex(s => s.id === id);
+    if (i < 0) return null;
+    rows[i].live = live;
+    write(LS.sessions, rows);
+    return rows[i];
+  }
+  if (Store.noLiveColumn) return false;
+  const { error } = await Store.sb.from('sessions').update({ live: live }).eq('id', id);
+  if (error) { Store.noLiveColumn = true; return false; }
+  return true;
 };
 
 Store.updateSession = async function (id, patch) {
@@ -461,9 +519,11 @@ Store.updateSession = async function (id, patch) {
     write(LS.sessions, rows);
     return rows[i];
   }
-  const { data, error } = await Store.sb.from('sessions').update(patch).eq('id', id).select().single();
+  /* No .select() on the way back: the row returned was the whole record
+     again, doubling the cost of every save for a value nobody read. */
+  const { error } = await Store.sb.from('sessions').update(patch).eq('id', id);
   if (error) throw new Error(error.message);
-  return data;
+  return true;
 };
 
 Store.deleteSession = async function (id) {

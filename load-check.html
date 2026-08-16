@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Load check — what the app asks the database for</title>
+<style>
+  body { font-family: Segoe UI, system-ui, sans-serif; margin: 20px; background:#0f1420; color:#e9eef7; }
+  h1 { font-size: 19px; }
+  table { border-collapse: collapse; margin-top: 14px; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid #2a3145; }
+  .n { font-family: Consolas, monospace; }
+  button { padding: 9px 16px; font-size: 15px; margin-right: 8px; }
+  #out { margin-top: 16px; white-space: pre-wrap; font-family: Consolas, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Load check</h1>
+<p>Counts every call the storage layer makes, and the bytes each one moves, so a change can be
+compared against the last run rather than argued about. Local mode: the numbers are call
+counts and payload sizes, which is what scales with people in the room.</p>
+<button id="run">Run a simulated lesson</button>
+<button id="reset">Reset counters</button>
+<div id="out">idle</div>
+
+<script type="module">
+import { Store } from './js/store.js';
+
+const counts = {};
+const bytes = {};
+function wrap(name) {
+  const original = Store[name];
+  if (typeof original !== 'function') return;
+  Store[name] = async function (...args) {
+    counts[name] = (counts[name] || 0) + 1;
+    try { bytes[name] = (bytes[name] || 0) + JSON.stringify(args).length; } catch (e) {}
+    return original.apply(this, args);
+  };
+}
+['listSessions', 'liveSession', 'updateSession', 'updateLive', 'listTrainees', 'listTopics', 'listProfiles']
+  .forEach(wrap);
+
+const out = document.getElementById('out');
+const show = (label) => {
+  const rows = Object.keys(counts).sort().map(k =>
+    k.padEnd(16) + String(counts[k]).padStart(5) + '  calls   ' +
+    String(Math.round((bytes[k] || 0) / 1024 * 10) / 10).padStart(8) + ' KB sent');
+  out.textContent = label + '\n\n' + (rows.join('\n') || '(nothing yet)');
+};
+
+document.getElementById('reset').onclick = () => {
+  Object.keys(counts).forEach(k => { counts[k] = 0; bytes[k] = 0; });
+  show('counters reset');
+};
+
+document.getElementById('run').onclick = async () => {
+  out.textContent = 'running…';
+  await Store.init();
+  const trainees = await Store.listTrainees();
+  const t = trainees[0];
+  if (!t) { out.textContent = 'Create a trainee in the app first (local mode).'; return; }
+
+  const s = await Store.createSession({ trainee_id: t.id, trainer_id: t.trainer_id, plan: {} });
+
+  /* A lesson's shape: a trainer marking and typing (many small changes)
+     and a trainee's page keeping up. Sixty changes is about a stage. */
+  const started = Date.now();
+  for (let i = 0; i < 60; i++) {
+    await Store.updateLive(s.id, { display: { kind: 'pron', words: ['water', 'better'], at: Date.now() }, stage_index: 2 });
+  }
+  /* the record itself, written the way the app now writes it: coalesced */
+  const big = { harvest: { words: new Array(20).fill('word') }, extras: {}, feedback: { text: 'x'.repeat(600) } };
+  for (let i = 0; i < 4; i++) await Store.updateSession(s.id, { data: big });
+
+  /* and one trainee following along for two minutes */
+  for (let i = 0; i < 40; i++) await Store.liveSession(t.id);
+
+  await Store.updateSession(s.id, { ended_at: new Date().toISOString() });
+  show('simulated lesson finished in ' + (Date.now() - started) + 'ms');
+};
+</script>
+</body>
+</html>

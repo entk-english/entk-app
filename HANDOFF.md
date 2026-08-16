@@ -12,7 +12,7 @@ Paste this whole file into a new session to pick up exactly where the last one s
 | **Live site** | https://entk-english.github.io/entk-app/ |
 | **Repo** | https://github.com/entk-english/entk-app (public — Pages needs public on the free plan) |
 | **Branch** | `main` |
-| **Current build** | `b35` (shown at the bottom of the sign-in card) |
+| **Current build** | `b36` (shown at the bottom of the sign-in card) |
 | **Diagnostic page** | https://entk-english.github.io/entk-app/mic-check.html |
 
 ### Files
@@ -31,9 +31,30 @@ games/pronunciation.html   the game; #r=<base64> word list, #mark=1 marking, #mo
 games/sprites/*.png        8 generated character sprites, transparent
 supabase-schema.sql        schema and row level security
 supabase-recordings.sql    the private recordings bucket and its policies — run once
+supabase-live-column.sql   the small `live` column and its index — run once
 mic-check.html             microphone / speech diagnostic
 mirror-test.html           player and mirror side by side, no second device needed
+load-check.html            counts storage calls and payload sizes for a simulated lesson
 ```
+
+### Load, and where it used to go (b36)
+
+Three people in a lesson was enough to feel it. Three causes, all fixed:
+
+1. **The trainer rewrote the whole record constantly.** Every mark and every keystroke wrote
+   the entire `data` blob, which grows all lesson. Now the fast-changing part — which stage,
+   what the trainee should see — lives in its own `live` column of a few hundred bytes, and
+   the full record is coalesced to at most one write every 1.5s, flushed on stage change, on
+   leaving, on finishing, and when the tab is hidden.
+2. **Every trainee polled for everything.** `listSessions()` fetched all their sessions with
+   the full blob and filtered in the browser. `Store.liveSession()` now asks for one row and
+   four columns, filtered in the database, with a partial index behind it.
+3. **The poll ran regardless.** The wire already carries every change instantly, so the poll
+   is now the safety net: one query a minute while the channel is alive, back to every three
+   seconds when it goes quiet, and nothing at all while the tab is hidden.
+
+If `supabase-live-column.sql` has not been run, `Store.noLiveColumn` trips on the first
+failure and everything falls back to the old whole-record path rather than breaking.
 
 ### The live channel
 

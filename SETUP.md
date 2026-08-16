@@ -34,10 +34,14 @@ Supabase."* or *"Running in local mode."*
    creates the private bucket the trainee's pronunciation attempts are uploaded to, so the
    trainer can play them back from their own device. Skip it and the app still runs — the
    trainer simply sees "could not upload" where a recording should be.
-5. **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
+5. **SQL Editor → New query** once more. Paste `supabase-live-column.sql` and **Run**. This
+   adds the small `live` column the trainee's screen reads from, and the index behind it.
+   Without it the app still works, but every trainee's page pulls the whole session record
+   every few seconds, which is what a room of more than two or three can feel.
+6. **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
    Newer dashboards label these under **API Keys** with the anon key called
    **publishable** (`sb_publishable_...`). Either form works.
-6. Paste both into `js/config.js`.
+7. Paste both into `js/config.js`.
 
 **Never put the `service_role` / secret key in this file.** It bypasses every access rule
 in the schema, and this file ends up in a public repository.

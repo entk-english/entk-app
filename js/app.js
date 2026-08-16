@@ -792,6 +792,7 @@ function openLiveLink(sessionId) {
   liveLinkId = sessionId;
   liveLink = openLink(sessionId);
   liveLink.on(msg => {
+    lastWireAt = Date.now();   // anything at all proves the channel is up
     if (msg.type === 'mark') {
       if (!msg.seq || msg.seq <= lastMarkSeq) return;
       lastMarkSeq = msg.seq;
@@ -810,11 +811,13 @@ function openLiveLink(sessionId) {
        rather than waiting for the next poll — the poll is now the slow
        safety net, not the thing that makes this feel live. */
     if (msg.type === 'display' && liveRow) {
-      liveRow.data = Object.assign({}, liveRow.data, {
+      const was = liveRow.live || {};
+      liveRow.live = {
         display: msg.display,
-        stage_index: typeof msg.idx === 'number' ? msg.idx : liveRow.data.stage_index,
-        stage_list: Array.isArray(msg.stages) ? msg.stages : liveRow.data.stage_list
-      });
+        stage_index: typeof msg.idx === 'number' ? msg.idx : was.stage_index,
+        stage_list: Array.isArray(msg.stages) ? msg.stages : was.stage_list
+      };
+      lastWireAt = Date.now();
       if (livePaint) livePaint(liveRow);
     }
   });
@@ -839,6 +842,8 @@ async function viewLive(body) {
 let liveTimer = null;
 let liveRow = null;      // the session row as last seen, patched by the wire
 let livePaint = null;    // repaint from a row without touching the database
+let lastWireAt = 0;      // when the wire last delivered anything
+let lastPollAt = 0;      // when the database was last asked
 
 const LIVE_STAGE_LABEL = {
   warmup: 'Warm-up',
@@ -868,8 +873,9 @@ async function followLiveSession(host, trainee) {
     let live = row || null;
     if (!live) {
       try {
-        const rows = await Store.listSessions(trainee.id);
-        live = rows.find(r => !r.ended_at) || null;
+        /* one row, four columns, filtered in the database — not every
+           session this trainee has ever had, blob and all */
+        live = await Store.liveSession(trainee.id);
       } catch (e) { return; }
       liveRow = live;
     }
@@ -892,7 +898,10 @@ async function followLiveSession(host, trainee) {
     openLiveLink(live.id);
     if (firstSighting && location.hash.indexOf('live') < 0) render();
 
-    const d = live.data || {};
+    /* Everything this page needs is in the live column: which stage, and
+       what the trainer published for it. The full record is never read
+       here. Sessions from before the live column fall back to it. */
+    const d = (live.live && live.live.display) ? live.live : (live.data || {});
     const stages = Array.isArray(d.stage_list) && d.stage_list.length
       ? d.stage_list
       : ['warmup', 'harvest', 'pron', 'stage4', 'feedback'];
@@ -1077,8 +1086,17 @@ async function followLiveSession(host, trainee) {
      of the database traffic a full room used to generate. */
   livePaint = (row) => tick(row);
   await tick();
+  lastPollAt = Date.now();
   liveTimer = setInterval(() => {
-    if (document.hidden) return;    // a backgrounded phone polls nothing
+    if (document.hidden) return;               // a backgrounded phone polls nothing
+    const wireAlive = liveRow && Date.now() - lastWireAt < 20000;
+    /* While the wire is delivering, this is only a safety net: one
+       query a minute. When it goes quiet — a dropped channel, a trainee
+       who just reloaded — it comes back to every three seconds. Fifty
+       trainees on a live channel cost the database one query a second
+       between them, instead of seventeen. */
+    if (wireAlive && Date.now() - lastPollAt < 60000) return;
+    lastPollAt = Date.now();
     tick();
   }, 3000);
 }
