@@ -471,6 +471,40 @@ Store.deleteSession = async function (id) {
   await Store.sb.from('sessions').delete().eq('id', id);
 };
 
+/* ---------------- recordings ----------------
+   The trainee's attempt is captured on their own device, so the trainer
+   can only hear it if it goes somewhere both of them can reach. It lands
+   in a private Supabase storage bucket under the trainee's own id, which
+   is what the storage policy checks: the trainee, their trainer and an
+   administrator can reach that folder and nobody else. Run
+   supabase-recordings.sql once to create the bucket and its policies.
+
+   In local mode there is no bucket and no second device — the audio
+   travels straight down the BroadcastChannel instead. */
+
+const RECORDINGS_BUCKET = 'recordings';
+
+Store.uploadRecording = async function (traineeId, sessionId, word, blob) {
+  if (Store.mode === 'local') return null;
+  const safe = String(word || 'word').toLowerCase().replace(/[^a-z0-9]/g, '') || 'word';
+  const ext = /ogg/.test(blob.type) ? 'ogg' : /mp4/.test(blob.type) ? 'mp4' : 'webm';
+  const path = traineeId + '/' + sessionId + '/' + Date.now() + '-' + safe + '.' + ext;
+  const { error } = await Store.sb.storage.from(RECORDINGS_BUCKET)
+    .upload(path, blob, { contentType: blob.type || 'audio/webm', upsert: false });
+  if (error) throw new Error(error.message);
+  return path;
+};
+
+/* Signed rather than public: the bucket stays private, and the link
+   expires long after the lesson it belongs to has ended. */
+Store.recordingUrl = async function (path) {
+  if (Store.mode === 'local') return null;
+  const { data, error } = await Store.sb.storage.from(RECORDINGS_BUCKET)
+    .createSignedUrl(path, 60 * 60 * 8);
+  if (error) throw new Error(error.message);
+  return data.signedUrl;
+};
+
 /* ---------------- export / import (local safety net) ---------------- */
 
 Store.exportAll = function () {

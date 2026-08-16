@@ -809,9 +809,20 @@ micBtn.onclick = async ()=>{
       micStream = await navigator.mediaDevices.getUserMedia({audio:true});
       chunks=[]; mediaRecorder = new MediaRecorder(micStream);
       mediaRecorder.ondataavailable = ev=>{ if(ev.data.size) chunks.push(ev.data); };
+      const wordAtStart = current().word;
       mediaRecorder.onstop = ()=>{
         if(chunks.length){ lastBlob = new Blob(chunks,{type:chunks[0].type||'audio/webm'});
-          document.getElementById('playbackBtn').disabled=false; }
+          document.getElementById('playbackBtn').disabled=false;
+          /* The trainer is on another device and cannot hear the room in
+             enough detail to judge a vowel. Hand the audio up so it can
+             be carried to them. */
+          if(EMBEDDED && !MONITOR){
+            try{
+              window.parent.postMessage({ source:'antoch-game', game:'pronunciation',
+                type:'recording', blob:lastBlob, word:wordAtStart, at:Date.now() }, '*');
+            }catch(e){}
+          }
+        }
         releaseMic();   // never leave the device held open between attempts
       };
       mediaRecorder.start();

@@ -628,6 +628,7 @@ let lastMarkSeq = 0;
 let liveClock = null;
 let liveLink = null;        // direct line to the trainer's device
 let liveLinkId = null;      // which session that line belongs to
+let liveTraineeId = null;   // whose folder recordings belong in
 
 /* The trainee's game is the one being played, so it is the source of
    truth for the fight. Every snapshot it emits goes straight up the
@@ -635,10 +636,32 @@ let liveLinkId = null;      // which session that line belongs to
    copy of the same monster. */
 function relayGameState(e) {
   const m = e.data;
-  if (!m || m.source !== 'antoch-game' || m.type !== 'state') return;
-  if (liveLink) liveLink.send('gamestate', { s: m.s });
+  if (!m || m.source !== 'antoch-game') return;
+  if (m.type === 'state') {
+    if (liveLink) liveLink.send('gamestate', { s: m.s });
+    return;
+  }
+  if (m.type === 'recording') sendRecording(m);
 }
 window.addEventListener('message', relayGameState);
+
+/* The attempt itself, so the trainer can listen rather than guess.
+   Cloud: into the private bucket, and only the path travels. Local mode
+   is one browser, so the audio itself goes down the channel. */
+async function sendRecording(m) {
+  if (!liveLink || !m.blob) return;
+  if (Store.mode === 'local') {
+    liveLink.send('recording', { blob: m.blob, word: m.word, at: m.at });
+    return;
+  }
+  if (!liveTraineeId || !liveLinkId) return;
+  try {
+    const path = await Store.uploadRecording(liveTraineeId, liveLinkId, m.word, m.blob);
+    liveLink.send('recording', { path, word: m.word, at: m.at });
+  } catch (e) {
+    liveLink.send('recording-failed', { word: m.word, reason: e.message });
+  }
+}
 
 /* The word form drill is typed here and marked there. The boxes live on
    this device, every keystroke goes up the wire, and Check and Reveal
@@ -773,6 +796,7 @@ async function followLiveSession(host, trainee) {
     }
     const firstSighting = !liveSessionOpen;
     liveSessionOpen = true;
+    liveTraineeId = trainee.id;
     openLiveLink(live.id);
     if (firstSighting && location.hash.indexOf('live') < 0) render();
 

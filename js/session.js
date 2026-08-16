@@ -576,6 +576,77 @@ function stagePron(body) {
   $('[data-good]', panel).onclick = () => sendMark(true);
   $('[data-bad]', panel).onclick = () => sendMark(false);
 
+  /* ---- what the trainee actually said ----
+     The attempt is captured on their device and uploaded to a private
+     bucket; only the path travels down the wire. Playing it here is how
+     a vowel gets judged instead of guessed. */
+  const takes = el(
+    '<div class="card"><div class="row between" style="margin-bottom:10px">' +
+      '<div><div class="eyebrow">Their recordings</div>' +
+      '<h3 style="margin:0">Newest first — tap to listen</h3></div></div>' +
+      '<div class="list" id="takes"></div>' +
+    '</div>'
+  );
+  body.appendChild(takes);
+
+  const takeList = $('#takes', takes);
+  S.data.pron.recordings = S.data.pron.recordings || [];
+  /* Local mode hands over the audio itself rather than a path. A Blob
+     does not survive JSON, so those takes stay in memory only. */
+  const memTakes = [];
+
+  const paintTakes = () => {
+    const rows = S.data.pron.recordings.concat(memTakes)
+      .sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-12).reverse();
+    if (!rows.length) {
+      takeList.innerHTML = '<div class="empty">Nothing yet. Each attempt your trainee records ' +
+        'appears here a second or two after they finish saying it.</div>';
+      return;
+    }
+    takeList.innerHTML = rows.map((r, n) =>
+      '<div class="item"><span class="badge level">' + esc(r.word || '—') + '</span>' +
+      '<div class="grow"><div class="meta">' +
+        new Date(r.at || Date.now()).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+      '</div></div>' +
+      '<button class="btn ghost sm" data-play="' + n + '">▶ Play</button></div>').join('');
+
+    $$('[data-play]', takeList).forEach(btn => {
+      btn.onclick = async () => {
+        const take = rows[Number(btn.dataset.play)];
+        btn.disabled = true;
+        try {
+          const src = take.blob ? URL.createObjectURL(take.blob) : await Store.recordingUrl(take.path);
+          const audio = new Audio(src);
+          audio.onended = () => { btn.disabled = false; };
+          audio.onerror = () => { btn.disabled = false; toast('That recording would not play.', 'err'); };
+          await audio.play();
+        } catch (e) {
+          btn.disabled = false;
+          toast('Could not fetch it: ' + e.message, 'err');
+        }
+      };
+    });
+  };
+  paintTakes();
+
+  S.onLink = (msg) => {
+    if (msg.type === 'recording') {
+      const take = { word: msg.word, at: msg.at || Date.now() };
+      if (msg.path) {
+        /* a path outlives the session: it can be replayed from the
+           history months later */
+        S.data.pron.recordings.push(Object.assign({ path: msg.path }, take));
+        persist();
+      } else if (msg.blob) {
+        memTakes.push(Object.assign({ blob: msg.blob }, take));
+      }
+      paintTakes();
+    }
+    if (msg.type === 'recording-failed') {
+      toast('Their device could not upload "' + msg.word + '": ' + msg.reason, 'err');
+    }
+  };
+
   const keyMark = (e) => {
     if (e.target && /input|textarea/i.test(e.target.tagName)) return;
     if (e.key === '1') { e.preventDefault(); sendMark(true); }

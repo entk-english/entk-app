@@ -12,7 +12,7 @@ Paste this whole file into a new session to pick up exactly where the last one s
 | **Live site** | https://entk-english.github.io/entk-app/ |
 | **Repo** | https://github.com/entk-english/entk-app (public — Pages needs public on the free plan) |
 | **Branch** | `main` |
-| **Current build** | `b26` (shown at the bottom of the sign-in card) |
+| **Current build** | `b29` (shown at the bottom of the sign-in card) |
 | **Diagnostic page** | https://entk-english.github.io/entk-app/mic-check.html |
 
 ### Files
@@ -21,16 +21,36 @@ Paste this whole file into a new session to pick up exactly where the last one s
 index.html                 app shell, theme applied before first paint
 css/app.css                all styling; light is :root, dark is [data-theme="dark"]
 js/config.js               keys and BUILD number — the only file normally edited
-js/store.js                storage adapter: localStorage or Supabase
+js/store.js                storage adapter: localStorage or Supabase, plus recordings
 js/content.js              all CEFR-tiered content, six levels
 js/session.js              the live session runner (trainer side)
 js/app.js                  auth, routing, trainee live view, admin
+js/live.js                 the device-to-device channel (realtime + BroadcastChannel)
 js/ui.js                   DOM helpers — note $ is one element, $$ is a list
-games/pronunciation.html   the game; accepts #r=<base64> word list, #mark=1 for trainer
+games/pronunciation.html   the game; #r=<base64> word list, #mark=1 marking, #monitor=1 mirror
 games/sprites/*.png        8 generated character sprites, transparent
 supabase-schema.sql        schema and row level security
+supabase-recordings.sql    the private recordings bucket and its policies — run once
 mic-check.html             microphone / speech diagnostic
+mirror-test.html           player and mirror side by side, no second device needed
 ```
+
+### The live channel
+
+The session row is written by the trainer only — row level security stops a trainee updating
+it, and both sides writing one jsonb blob would clobber each other. So anything travelling
+*upwards* goes over `js/live.js`: a Supabase realtime broadcast channel named after the
+session id, with a BroadcastChannel alongside it so both roles work in one browser. Nothing
+is stored on it. Message types in use:
+
+| from | type | carries |
+|---|---|---|
+| trainer | `mark` | a verdict, with a sequence number |
+| trainer | `restart` | restart the round on both screens |
+| trainer | `wfcheck` / `wfnext` | word-form marking, and clearing for the next word |
+| trainee | `gamestate` | the fight snapshot the trainer's mirror draws |
+| trainee | `wfanswers` | what they have typed in the four boxes |
+| trainee | `recording` | the path of an uploaded attempt (or the blob, in local mode) |
 
 ---
 
@@ -80,27 +100,42 @@ is visible rather than mysterious. Hard-reload with Ctrl+Shift+R after deploying
 
 ---
 
-## What is left — the outstanding notes
+## Done in b27–b29
 
-**3a — trainer's monitor does not follow the trainee.** The iframe on the trainer's side is an
-independent copy of the game, so when the trainee kills a monster the trainer still sees it
-alive. It needs to mirror state from the session record rather than run its own.
+**3a — the trainer's mirror follows the trainee.** The monitor iframe runs under `#monitor=1`
+with its engine read-only: the trainee's copy publishes a snapshot every 500ms and the mirror
+draws it. A dead monster is dead on both screens. The mirror never asks for a microphone.
 
-**3b — trainer cannot hear the trainee's recording.** The audio only exists on the trainee's
-device. Needs uploading to Supabase storage and fetching back on the trainer's side. The
-biggest of the remaining jobs.
+**3b — the trainer can hear the attempt.** Each recording is uploaded from the trainee's
+device to the private `recordings` bucket under `<trainee_id>/<session_id>/`, and only the
+path travels over the channel. The trainer gets a "Their recordings" list with a Play button
+per take; paths are kept in the session record, so they replay later too.
+**Run `supabase-recordings.sql` once** — without it the upload fails and the trainer sees
+"could not upload" instead of a take.
+
+**4 — the Word Form Drill is the right way round.** The trainee types the four forms on their
+own device; the answers land on the trainer's desk as they type. Check turns the wrong ones
+red over there, Reveal writes the answers into their boxes.
+
+**6 — the look.** Ruled backdrop, lit top rail and hatched corner on every card, a mark under
+each heading, a patterned prompt box, the stage bar redrawn as a route with a pulse on the
+current stage, and lift on buttons, chips and rows. All of it off under
+`prefers-reduced-motion`.
+
+## What is left
 
 **3c — recognition scores 0%.** Playback proves the audio recorded, so capture works and the
-recogniser returns nothing. Diagnose with `mic-check.html`; its event trace is the decisive
-part, since `soundstart` and `speechstart` firing prove the browser actually heard speech.
+recogniser returns nothing. `mic-check.html` now has section **5b**, which runs recognition
+with a MediaRecorder beside it — exactly what the game does. If section 4 hears you and 5b
+does not, the second capture is starving the recogniser, which is the classic Windows
+symptom and matches "it recorded perfectly and scored 0%". The game already reacts: two
+silent runs with recording on switches recording off by itself. Run both sections in Edge
+and in Chrome and compare the event traces.
 
-**4 — Word Form Drill split.** The trainee should get the four fillable boxes — noun,
-infinitive, past, adjective — and type answers on their own device. The trainer presses Check
-and wrong ones turn red on the trainee's screen; Reveal shows the correct answers there.
-Currently backwards: the trainer has the inputs and the trainee sees a static grid.
-
-**6 — the look.** Described as dull and boring. Needs shape, pattern and life — not a colour
-tweak.
+**Not yet proven on two real devices.** The mirror, the word-form split and the recordings
+were all built and tested on one machine (`mirror-test.html` for the game, and a probe that
+confirmed Supabase realtime broadcast connects and round-trips with the anon key). The
+cross-device run — trainer on one device, trainee on another, in Edge — has not happened yet.
 
 **Smaller, still open**
 - Bosses 8, 9 and 10 reuse earlier sprites until Hugging Face credits reset
@@ -124,6 +159,11 @@ Anything driven purely by rAF also needs a wall-clock fallback, or a hidden tab 
 **Verifying canvas visually.** Screenshots fail in the agent browser. The way round it:
 `render()`, then post `canvas.toDataURL()` to a small local Node receiver that writes a PNG,
 then read that file. Without this, visual work is guesswork.
+
+**Two channels, two jobs.** `publish({...})` writes what the trainee should *see* into the
+session record and is polled every 1.5 seconds; `link.send(...)` is the instant, unstored
+wire. Marks go down both — the wire for speed, the record so a trainee who reloads is not
+left behind. Anything the trainee sends can only use the wire.
 
 **Publishing to the trainee.** Every stage calls `publish({...})` in `js/session.js` with what
 the trainee should see. The trainee's page in `js/app.js` polls every 1.5 seconds and renders

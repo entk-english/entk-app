@@ -30,10 +30,14 @@ Supabase."* or *"Running in local mode."*
    pick the nearest region. Wait for provisioning.
 3. **SQL Editor → New query**. Paste the whole of `supabase-schema.sql` and press **Run**.
    Expect *Success. No rows returned*.
-4. **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
+4. **SQL Editor → New query** again. Paste `supabase-recordings.sql` and **Run**. This
+   creates the private bucket the trainee's pronunciation attempts are uploaded to, so the
+   trainer can play them back from their own device. Skip it and the app still runs — the
+   trainer simply sees "could not upload" where a recording should be.
+5. **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
    Newer dashboards label these under **API Keys** with the anon key called
    **publishable** (`sb_publishable_...`). Either form works.
-5. Paste both into `js/config.js`.
+6. Paste both into `js/config.js`.
 
 **Never put the `service_role` / secret key in this file.** It bypasses every access rule
 in the schema, and this file ends up in a public repository.
