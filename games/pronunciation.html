@@ -929,6 +929,20 @@ function markManually(good){
 /* The trainee may open the shared link on their own device; the
    verdict belongs to the trainer, so the controls appear only when the
    game is embedded in the session app the trainer is running. */
+/* A mark can now arrive from the trainer's device rather than from
+   this keyboard. Each carries a sequence number so a repeated poll
+   never lands the same hit twice. */
+let lastRemoteMark = 0;
+window.addEventListener('message', function(e){
+  const m = e.data;
+  if(!m || m.source !== 'antoch-host') return;
+  if(m.type === 'mark'){
+    if(!m.seq || m.seq <= lastRemoteMark) return;
+    lastRemoteMark = m.seq;
+    markManually(m.verdict === 'good');
+  }
+});
+
 (function trainerOnlyMarking(){
   if(window.parent === window){
     const row=document.getElementById('markRow');

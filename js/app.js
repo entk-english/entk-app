@@ -622,6 +622,8 @@ async function viewMyHistory(body) {
 /* Set whenever a live session is seen, so the top bar can offer the
    Follow along tab only when there is something to follow. */
 let liveSessionOpen = false;
+let liveFrame = null;
+let lastMarkSeq = 0;
 
 /* The dedicated page: the trainee lands on whatever stage the trainer
    is on, and plays the game on their own device. */
@@ -692,9 +694,19 @@ async function followLiveSession(host, trainee) {
     const stage = stages[idx];
     const words = (d.harvest && d.harvest.words) || [];
 
+    /* Relay the trainer's verdict into the running game before any
+       redraw decision, so a hit is never lost to a rebuild. */
+    const control = d.control;
+    if (control && control.seq && control.seq > lastMarkSeq && liveFrame && liveFrame.contentWindow) {
+      lastMarkSeq = control.seq;
+      liveFrame.contentWindow.postMessage(
+        { source: 'antoch-host', type: 'mark', seq: control.seq, verdict: control.verdict }, '*');
+    }
+
     /* only rebuild when something actually changed, so an embedded
        game is not torn down and restarted every few seconds */
     const key = stage + '|' + idx + '|' + words.join(',') + '|' + ((d.harvest && d.harvest.topic) || '');
+    if (key !== lastKey) { liveFrame = null; }
     if (key === lastKey) return;
     lastKey = key;
 
@@ -717,9 +729,11 @@ async function followLiveSession(host, trainee) {
     }
 
     if (stage === 'pron' && words.length) {
-      host.appendChild(el('<p class="sub">Your words for today — say each one when your trainer asks.</p>'));
-      host.appendChild(el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
-        encodeURIComponent(b64({ w: words.slice(0, 20), v: [] })) + '"></iframe>'));
+      host.appendChild(el('<p class="sub">Say each word out loud. Your trainer decides if it counts.</p>'));
+      const frame = el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
+        encodeURIComponent(b64({ w: words.slice(0, 20), v: [] })) + '"></iframe>');
+      host.appendChild(frame);
+      liveFrame = frame;
     } else if (words.length) {
       host.appendChild(el('<div class="card tight"><div class="eyebrow">Words from today</div><div class="chips">' +
         words.map(w => '<span class="chip static">' + esc(w) + '</span>').join('') + '</div></div>'));
@@ -732,7 +746,7 @@ async function followLiveSession(host, trainee) {
   };
 
   await tick();
-  liveTimer = setInterval(tick, 4000);
+  liveTimer = setInterval(tick, 1500);
 }
 
 /* =============================================================

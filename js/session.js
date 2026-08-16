@@ -486,8 +486,65 @@ function stagePron(body) {
     '</div>'
   ));
 
-  const frame = el('<iframe class="gameframe" allow="microphone" src="games/pronunciation.html#r=' +
+  /* The trainee plays this on their own device. The trainer gets a
+     conductor's desk instead of a second copy of the game: which word
+     is live, and the verdict buttons that land the hit over there. */
+  S.data.pron = Object.assign({}, S.data.pron, { words });
+  S.data.control = S.data.control || { seq: 0, verdict: null, wordIndex: 0 };
+
+  const panel = el(
+    '<div class="card">' +
+      '<div class="row between" style="margin-bottom:14px">' +
+        '<div><div class="eyebrow">Now saying</div>' +
+        '<div id="cw" style="font-size:34px;font-weight:800;letter-spacing:-0.5px"></div></div>' +
+        '<div class="row">' +
+          '<button class="btn" data-good style="font-size:17px;padding:14px 30px">✓ Correct</button>' +
+          '<button class="btn danger" data-bad style="font-size:17px;padding:14px 30px">✗ Wrong</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="chips" id="wordline"></div>' +
+      '<p class="sub" style="margin:14px 0 0">Keys <b>1</b> correct · <b>2</b> wrong. The hit lands on your trainee\'s screen.</p>' +
+    '</div>'
+  );
+  body.appendChild(panel);
+
+  const paintPanel = () => {
+    const i = S.data.control.wordIndex || 0;
+    $('#cw', panel).textContent = words[i] || '—';
+    $('#wordline', panel).innerHTML = words.map((w, n) =>
+      '<span class="chip' + (n === i ? ' on' : n < i ? ' gold' : '') + '">' + esc(w) + '</span>').join('');
+  };
+  paintPanel();
+
+  const sendMark = async (good) => {
+    const c = S.data.control;
+    c.seq = (c.seq || 0) + 1;
+    c.verdict = good ? 'good' : 'bad';
+    c.at = Date.now();
+    /* three clean hits clear a word, matching the game's own pacing */
+    c.hits = good ? (c.hits || 0) + 1 : 0;
+    if (c.hits >= 3) { c.hits = 0; c.wordIndex = Math.min(words.length - 1, (c.wordIndex || 0) + 1); }
+    paintPanel();
+    await persist();
+    toast(good ? 'Correct — hit sent.' : 'Wrong — sent.', good ? 'ok' : 'err');
+  };
+
+  $('[data-good]', panel).onclick = () => sendMark(true);
+  $('[data-bad]', panel).onclick = () => sendMark(false);
+
+  const keyMark = (e) => {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    if (e.key === '1') { e.preventDefault(); sendMark(true); }
+    if (e.key === '2') { e.preventDefault(); sendMark(false); }
+  };
+  document.addEventListener('keydown', keyMark);
+  S.onLeave = () => document.removeEventListener('keydown', keyMark);
+
+  /* A small monitor, muted and unplayable, so the trainer can see what
+     the trainee sees without needing a second microphone. */
+  const frame = el('<iframe class="gameframe" style="height:min(52vh,460px)" src="games/pronunciation.html#r=' +
     encodeURIComponent(b64({ w: words, v: [] })) + '"></iframe>');
+  body.appendChild(el('<p class="sub" style="margin:18px 0 6px">What your trainee sees</p>'));
   body.appendChild(frame);
 
   S.data.pron = S.data.pron || { words };
