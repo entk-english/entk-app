@@ -310,7 +310,7 @@ function stageWarmup(body) {
 
     publish({ kind: 'warmup', format: def.name, hint: def.hint, prompt: shown });
 
-    $('[data-f]', card).forEach(c => c.onclick = () => { format = c.dataset.f; drawFormat(); });
+    $$('[data-f]', card).forEach(c => c.onclick = () => { format = c.dataset.f; drawFormat(); });
     $('[data-again]', card).onclick = drawFormat;
 
     const addOwn = () => {
@@ -353,8 +353,13 @@ function stageHarvest(body) {
       '<div class="eyebrow">Anchor — everyday</div><div class="chips" id="h-anchor" style="margin-bottom:12px"></div>' +
       '<div class="eyebrow">Stretch — unusual, forces new language</div><div class="chips" id="h-stretch"></div>' +
       '<div class="row" style="margin-top:20px;align-items:center">' +
-        '<button class="btn gold" id="h-start">Start 60 seconds</button>' +
-        '<div class="timer" id="h-clock" style="font-size:34px">01:00</div>' +
+        '<select id="h-len" style="width:112px">' +
+          [30,60,90,120,180,300,600].map(sec =>
+            '<option value="' + sec + '"' + (sec === (h.length || 60) ? ' selected' : '') + '>' +
+            (sec < 60 ? sec + ' sec' : (sec/60) + ' min') + '</option>').join('') +
+        '</select>' +
+        '<button class="btn gold" id="h-start">Start</button>' +
+        '<div class="timer" id="h-clock" style="font-size:34px">--:--</div>' +
         '<span class="sub" style="margin:0">Trainee talks without stopping. Do not interrupt.</span>' +
       '</div>' +
     '</div>'
@@ -379,15 +384,18 @@ function stageHarvest(body) {
 
   /* 60 second speaking countdown, entirely separate from the stage clock */
   let talkTimer = null;
+  $('#h-len', card).addEventListener('change', e => { h.length = +e.target.value; });
   $('#h-start', card).onclick = () => {
-    publish({ kind: 'harvest', topic: h.topic, running: true, startedAt: Date.now() });
+    h.length = +$('#h-len', card).value || 60;
+    publish({ kind: 'harvest', topic: h.topic, running: true, startedAt: Date.now(), length: h.length });
     clearInterval(talkTimer);
     const clock = $('#h-clock', card);
-    let left = 60;
+    let left = h.length;
     const paint = () => {
-      clock.textContent = '00:' + String(Math.max(0, left)).padStart(2, '0');
+      const mm = Math.floor(Math.max(0, left) / 60), ss = Math.max(0, left) % 60;
+      clock.textContent = String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
       clock.className = 'timer' + (left <= 10 ? ' warn' : '');
-      if (left <= 0) { clearInterval(talkTimer); h.seconds = 60; toast('Sixty seconds up — now harvest what you heard.', 'info'); }
+      if (left <= 0) { clearInterval(talkTimer); h.seconds = h.length; toast('Time up — now harvest what you heard.', 'info'); }
       left--;
     };
     paint();
@@ -560,7 +568,7 @@ function stagePron(body) {
 
   /* A small monitor, muted and unplayable, so the trainer can see what
      the trainee sees without needing a second microphone. */
-  const frame = el('<iframe class="gameframe" style="height:min(52vh,460px)" src="games/pronunciation.html#r=' +
+  const frame = el('<iframe class="gameframe" style="height:min(52vh,460px)" src="games/pronunciation.html#mark=1&r=' +
     encodeURIComponent(b64({ w: words, v: [] })) + '"></iframe>');
   body.appendChild(el('<p class="sub" style="margin:18px 0 6px">What your trainee sees</p>'));
   body.appendChild(frame);
@@ -719,7 +727,7 @@ function stageExpansion(body) {
       '<div id="ex-model"></div>';
 
     publish({ kind: 'expansion', base: store.base, steps: store.steps });
-    $('[data-s]', card).forEach(i => i.addEventListener('input', e => {
+    $$('[data-s]', card).forEach(i => i.addEventListener('input', e => {
       store.steps[e.target.dataset.s] = e.target.value;
       publish({ kind: 'expansion', base: store.base, steps: store.steps });
     }));
@@ -855,46 +863,164 @@ async function fetchPicture() {
    STAGE 5 — FEEDBACK NOTE
    ============================================================= */
 
+/* The trainer's own report format. Points can be dropped into any
+   section while the lesson runs, or the whole thing written at the
+   end — both paths produce the same note. */
+const REPORT_SECTIONS = [
+  ['strengths',    'Strengths'],
+  ['improve',      'Areas for Improvement'],
+  ['weakness',     'Main Weakness'],
+  ['needs',        'Needs to Be Improved'],
+  ['plan',         'Action Plan for Next Session'],
+  ['didwell',      'What You Did Well'],
+  ['focus',        'One Focus Area'],
+  ['trynext',      'What to Try Next Time']
+];
+
+function reportStore() {
+  S.data.report = S.data.report || {};
+  REPORT_SECTIONS.forEach(([k]) => { S.data.report[k] = S.data.report[k] || []; });
+  if (typeof S.data.report.comment !== 'string') S.data.report.comment = '';
+  if (typeof S.data.report.pasted !== 'string') S.data.report.pasted = '';
+  return S.data.report;
+}
+
+/* Available from every stage, so a point can be caught the moment it
+   happens rather than remembered at the end. */
+async function addReportPoint(key, text) {
+  const r = reportStore();
+  if (!text || !text.trim()) return;
+  r[key].push(text.trim());
+  await persist();
+}
+
 function stageFeedback(body) {
   const fb = S.data.feedback;
+  const r = reportStore();
+  let mode = r.pasted ? 'paste' : 'build';
 
-  const inputs = el('<div class="card">' +
-    '<div class="grid two">' +
-      '<div class="field"><label>Today\'s win</label>' +
-        '<textarea id="f-win" placeholder="One thing that clearly went better">' + esc(fb.win) + '</textarea></div>' +
-      '<div class="field"><label>Focus for next time</label>' +
-        '<textarea id="f-focus" placeholder="One thing to work on before the next session">' + esc(fb.focus) + '</textarea></div>' +
-    '</div>' +
-    '<button class="btn sm" data-refresh>Rebuild note</button></div>');
-  body.appendChild(inputs);
+  const wrap = el('<div></div>');
+  body.appendChild(wrap);
 
-  const out = el('<div class="card"><div class="row between" style="margin-bottom:12px">' +
-    '<h2 style="margin:0">Note to read aloud</h2>' +
-    '<div class="row"><button class="btn sm" data-copy>Copy</button>' +
-    '<button class="btn sm ghost" data-dl>Download .txt</button></div></div>' +
-    '<div class="feedback-out" id="fout"></div></div>');
-  body.appendChild(out);
+  function draw() {
+    wrap.innerHTML = '';
 
-  const paint = () => {
-    fb.win = $('#f-win', inputs).value;
-    fb.focus = $('#f-focus', inputs).value;
+    wrap.appendChild(el(
+      '<div class="tabs" style="max-width:420px">' +
+        '<button class="' + (mode === 'build' ? 'active' : '') + '" data-mode="build">Build from points</button>' +
+        '<button class="' + (mode === 'paste' ? 'active' : '') + '" data-mode="paste">Write it myself</button>' +
+      '</div>'
+    ));
+
+    if (mode === 'build') {
+      const grid = el('<div class="grid two"></div>');
+      REPORT_SECTIONS.forEach(([key, label]) => {
+        const card = el(
+          '<div class="card tight">' +
+            '<div class="eyebrow">' + esc(label) + '</div>' +
+            '<div class="list" data-list="' + key + '"></div>' +
+            '<div class="row" style="margin-top:9px">' +
+              '<input data-in="' + key + '" placeholder="Add a point" style="flex:1;min-width:140px">' +
+              '<button class="btn sm" data-add="' + key + '">Add</button>' +
+            '</div>' +
+          '</div>'
+        );
+        const list = $('[data-list="' + key + '"]', card);
+        if (!r[key].length) list.appendChild(el('<div class="sub" style="margin:0;font-size:13px">Nothing yet.</div>'));
+        r[key].forEach((point, i) => {
+          const row = el('<div class="item" style="padding:8px 11px"><div class="grow" style="font-size:13.5px">' +
+            esc(point) + '</div><button class="btn ghost sm" data-del>×</button></div>');
+          $('[data-del]', row).onclick = () => { r[key].splice(i, 1); persist(); draw(); };
+          list.appendChild(row);
+        });
+        const commit = () => {
+          const box = $('[data-in="' + key + '"]', card);
+          if (!box.value.trim()) return;
+          r[key].push(box.value.trim());
+          box.value = '';
+          persist();
+          draw();
+        };
+        $('[data-add="' + key + '"]', card).onclick = commit;
+        $('[data-in="' + key + '"]', card).addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        });
+        grid.appendChild(card);
+      });
+      wrap.appendChild(grid);
+
+      const comment = el('<div class="card"><div class="eyebrow">Trainer&#39;s Overall Comment</div>' +
+        '<textarea id="r-comment" style="min-height:120px" placeholder="A short paragraph tying it together">' +
+        esc(r.comment) + '</textarea></div>');
+      $('#r-comment', comment).addEventListener('input', e => { r.comment = e.target.value; paint(); });
+      wrap.appendChild(comment);
+    } else {
+      const pasteCard = el('<div class="card"><div class="eyebrow">Your own note</div>' +
+        '<p class="sub">Write it here, or paste one you have already written. It is sent exactly as typed.</p>' +
+        '<textarea id="r-paste" style="min-height:300px">' + esc(r.pasted) + '</textarea></div>');
+      $('#r-paste', pasteCard).addEventListener('input', e => { r.pasted = e.target.value; paint(); });
+      wrap.appendChild(pasteCard);
+    }
+
+    $$('[data-mode]', wrap).forEach(b => b.onclick = () => { mode = b.dataset.mode; draw(); });
+
+    const out = el('<div class="card"><div class="row between" style="margin-bottom:12px">' +
+      '<h2 style="margin:0">The note</h2>' +
+      '<div class="row"><button class="btn sm" data-copy>Copy</button>' +
+      '<button class="btn sm ghost" data-dl>Download .txt</button></div></div>' +
+      '<div class="feedback-out" id="fout"></div></div>');
+    wrap.appendChild(out);
+
+    $('[data-copy]', out).onclick = async () => { await copyText(fb.text); toast('Copied.'); };
+    $('[data-dl]', out).onclick = () => downloadText(
+      S.trainee.name.replace(/\s+/g, '-').toLowerCase() + '-' + new Date().toISOString().slice(0, 10) + '.txt',
+      fb.text);
+
+    paint();
+  }
+
+  function paint() {
     fb.text = buildNote();
-    $('#fout', out).textContent = fb.text;
+    const node = $('#fout', wrap);
+    if (node) node.textContent = fb.text;
     publish({ kind: 'feedback', text: fb.text });
-  };
-  paint();
+    persist();
+  }
 
-  $('#f-win', inputs).addEventListener('input', paint);
-  $('#f-focus', inputs).addEventListener('input', paint);
-  $('[data-refresh]', inputs).onclick = paint;
-  $('[data-copy]', out).onclick = async () => {
-    await copyText(fb.text);
-    toast('Note copied — paste it into the chat.');
-  };
-  $('[data-dl]', out).onclick = () => downloadText(
-    S.trainee.name.replace(/\s+/g, '-').toLowerCase() + '-' + new Date().toISOString().slice(0, 10) + '.txt',
-    fb.text
-  );
+  draw();
+}
+
+/* The note itself, in the trainer's format. A pasted note wins outright;
+   otherwise the sections are assembled, and empty ones are left out
+   rather than printed as blank headings. */
+function buildReport() {
+  const t = S.trainee;
+  const r = reportStore();
+  if (r.pasted && r.pasted.trim()) return r.pasted.trim();
+
+  const n = (S.history ? S.history.length : 0) + 1;
+  const lines = [];
+  lines.push('Date: ' + fmtDate(new Date().toISOString()));
+  lines.push('Trainee Name: ' + t.name);
+  lines.push('Trainer: ' + ((Store.me && (Store.me.name || Store.me.email)) || ''));
+  lines.push('Session Number: ' + n);
+  lines.push('Level: ' + t.level);
+  lines.push('');
+
+  REPORT_SECTIONS.forEach(([key, label]) => {
+    if (!r[key] || !r[key].length) return;
+    lines.push(label);
+    r[key].forEach(p => lines.push('- ' + p));
+    lines.push('');
+  });
+
+  if (r.comment && r.comment.trim()) {
+    lines.push("Trainer's Overall Comment");
+    lines.push(r.comment.trim());
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
 }
 
 function fillerTotal(data) {
@@ -908,10 +1034,15 @@ function buildNote() {
   const t = S.trainee;
   const h = S.data.harvest;
   const fb = S.data.feedback;
-  const lines = [];
+  const r = reportStore();
 
-  lines.push('ANTOCH SESSION TRAINER — ' + fmtDate(new Date().toISOString()));
-  lines.push(t.name + ' · level ' + t.level);
+  /* A note written by hand is sent exactly as written. */
+  if (r.pasted && r.pasted.trim()) return r.pasted.trim();
+
+  const lines = [];
+  lines.push(buildReport());
+  lines.push('');
+  lines.push('— session record —');
   lines.push('');
 
   if (h.topic) { lines.push('TOPIC'); lines.push(h.topic); lines.push(''); }
@@ -977,8 +1108,7 @@ function buildNote() {
   const pic = S.data.extras.picture;
   if (pic && pic.notes) { lines.push('PICTURE DESCRIPTION'); lines.push(pic.notes); lines.push(''); }
 
-  if (fb.win) { lines.push("TODAY'S WIN"); lines.push(fb.win); lines.push(''); }
-  if (fb.focus) { lines.push('FOCUS FOR NEXT TIME'); lines.push(fb.focus); lines.push(''); }
+
 
   return lines.join('\n').trim();
 }

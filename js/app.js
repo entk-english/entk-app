@@ -732,12 +732,13 @@ async function followLiveSession(host, trainee) {
       host.appendChild(el('<div class="prompt-box">' + esc(dsp.topic || d.harvest && d.harvest.topic || 'Waiting for your topic…') + '</div>'));
       host.appendChild(el('<p class="sub" style="text-align:center;margin-top:14px">Talk for one minute without stopping. Do not worry about mistakes.</p>'));
       if (dsp.running && dsp.startedAt) {
-        const clock = el('<div class="timer" style="text-align:center;font-size:56px;margin-top:10px">01:00</div>');
+        const total = dsp.length || 60;
+        const clock = el('<div class="timer" style="text-align:center;font-size:56px;margin-top:10px">--:--</div>');
         host.appendChild(clock);
         clearInterval(liveClock);
         const paintClock = () => {
-          const left = Math.max(0, 60 - Math.round((Date.now() - dsp.startedAt) / 1000));
-          clock.textContent = '00:' + String(left).padStart(2, '0');
+          const left = Math.max(0, total - Math.round((Date.now() - dsp.startedAt) / 1000));
+          clock.textContent = String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0');
           clock.className = 'timer' + (left <= 10 ? ' warn' : '');
           if (left <= 0) clearInterval(liveClock);
         };

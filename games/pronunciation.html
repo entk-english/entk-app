@@ -943,11 +943,14 @@ window.addEventListener('message', function(e){
   }
 });
 
-(function trainerOnlyMarking(){
-  if(window.parent === window){
-    const row=document.getElementById('markRow');
-    if(row) row.style.display='none';
-  }
+/* Who may mark is stated in the URL, not guessed from whether the page
+   sits in a frame. The trainee's screen embeds this game too, so the
+   old frame test showed them the very buttons meant for the trainer. */
+(function markingVisibility(){
+  const row = document.getElementById('markRow');
+  if(!row) return;
+  const allowed = /[#&]mark=1/.test(location.hash);
+  row.style.display = allowed ? '' : 'none';
 })();
 
 (function wireMarking(){
