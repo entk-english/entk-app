@@ -806,6 +806,17 @@ function openLiveLink(sessionId) {
     if (msg.type === 'fieldnext') clearFields();
     if (msg.type === 'fieldflag') flagField(msg);
     if (msg.type === 'fieldnote') noteFields(msg);
+    /* The trainer's screen just changed. Repaint from what they sent
+       rather than waiting for the next poll — the poll is now the slow
+       safety net, not the thing that makes this feel live. */
+    if (msg.type === 'display' && liveRow) {
+      liveRow.data = Object.assign({}, liveRow.data, {
+        display: msg.display,
+        stage_index: typeof msg.idx === 'number' ? msg.idx : liveRow.data.stage_index,
+        stage_list: Array.isArray(msg.stages) ? msg.stages : liveRow.data.stage_list
+      });
+      if (livePaint) livePaint(liveRow);
+    }
   });
 }
 
@@ -826,6 +837,8 @@ async function viewLive(body) {
 
 
 let liveTimer = null;
+let liveRow = null;      // the session row as last seen, patched by the wire
+let livePaint = null;    // repaint from a row without touching the database
 
 const LIVE_STAGE_LABEL = {
   warmup: 'Warm-up',
@@ -850,13 +863,16 @@ async function followLiveSession(host, trainee) {
 
   let lastKey = '';
 
-  const tick = async () => {
+  const tick = async (row) => {
     if (!document.body.contains(host)) { clearInterval(liveTimer); return; }
-    let live = null;
-    try {
-      const rows = await Store.listSessions(trainee.id);
-      live = rows.find(r => !r.ended_at) || null;
-    } catch (e) { return; }
+    let live = row || null;
+    if (!live) {
+      try {
+        const rows = await Store.listSessions(trainee.id);
+        live = rows.find(r => !r.ended_at) || null;
+      } catch (e) { return; }
+      liveRow = live;
+    }
 
     if (!live) {
       const was = liveSessionOpen;
@@ -1055,8 +1071,16 @@ async function followLiveSession(host, trainee) {
     }
   };
 
+  /* The wire carries every change the moment it happens, so this poll
+     exists for the trainee who reloads, joins late, or whose channel
+     never came up. Three seconds of that is plenty, and it is a third
+     of the database traffic a full room used to generate. */
+  livePaint = (row) => tick(row);
   await tick();
-  liveTimer = setInterval(tick, 1500);
+  liveTimer = setInterval(() => {
+    if (document.hidden) return;    // a backgrounded phone polls nothing
+    tick();
+  }, 3000);
 }
 
 /* =============================================================

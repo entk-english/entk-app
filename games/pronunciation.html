@@ -165,7 +165,7 @@
         <button class="miniBtn" id="listenBtn">🔊 Hear it</button>
         <button class="miniBtn" id="slowBtn">🐢 Slowly</button>
       </div>
-      <button id="micBtn" title="Click, then say the word">🎤</button>
+      <button id="micBtn" title="Tap to record, tap again to stop">🎤</button>
       <div class="sideBtns">
         <button class="miniBtn" id="playbackBtn" disabled>▶ My recording</button>
         <button class="miniBtn" id="quitBtn">✕ Exit</button>
@@ -670,6 +670,14 @@ function stopListening(){
   else releaseMic();
 }
 
+/* The trainee closing the microphone by hand: stop the recogniser too,
+   then let the recorder's own stop handler save the take. */
+function stopRecording(){
+  try{ if(recognition) recognition.stop(); }catch(e){}
+  stopListening();
+  setStatus('Saved. Play it back with <b>▶ My recording</b>, or tap the mic to try again.');
+}
+
 // Ask for the mic once when the battle opens, not on the first attempt —
 // otherwise the permission prompt eats the trainee's first spoken word.
 // The stream is released straight away: the point is to bank the permission,
@@ -775,10 +783,15 @@ function setupLocalSpeech(){
 })();
 
 micBtn.onclick = async ()=>{
-  if(!recognition || listening || state.busy || !state.running) return;
+  /* A second tap closes the microphone and banks the take. The
+     recogniser used to decide when the trainee had finished speaking,
+     which cut long words short and left the mic open on quiet ones —
+     and an open microphone during a lesson is its own problem. */
+  if(listening){ stopRecording(); return; }
+  if(!recognition || state.busy || !state.running) return;
   listening=true; gotResult=false;
   micBtn.classList.add('listening');
-  setStatus('Listening… say <b>'+current().word+'</b>');
+  setStatus('Recording… say <b>'+current().word+'</b>, then <b>tap the microphone again</b> to stop.');
   // Capture audio in parallel so the trainee can hear themselves back.
   // Optional on purpose: on some machines a second capture running
   // alongside the recognizer is exactly what stops speech being heard,
@@ -829,18 +842,44 @@ function pickAmerican(entry){
   return aVowel || list[0];
 }
 
+/* The dictionary answer for a word never changes, so it is worth
+   keeping between rounds and between reloads. Restarting the game used
+   to re-fetch every word over the network before the first monster
+   appeared, which is most of what "the game takes too long to reload"
+   was. A stored answer is instant and works offline. */
+const IPA_STORE = 'ast:ipa';
+let ipaDisk = {};
+try{ ipaDisk = JSON.parse(localStorage.getItem(IPA_STORE)) || {}; }catch(e){ ipaDisk = {}; }
+let ipaFlush = null;
+function rememberIPA(key, value){
+  ipaDisk[key] = value;
+  clearTimeout(ipaFlush);
+  ipaFlush = setTimeout(()=>{
+    try{ localStorage.setItem(IPA_STORE, JSON.stringify(ipaDisk)); }catch(e){}
+  }, 400);
+}
+
 async function lookupIPA(word){
   const key = String(word||'').toLowerCase().trim();
   if(!key) return '';
   if(key in ipaCache) return ipaCache[key];
+  if(key in ipaDisk){ ipaCache[key] = ipaDisk[key]; return ipaCache[key]; }
   ipaCache[key] = '';
   try{
-    const res = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(key));
+    /* never let a slow dictionary hold up the first monster */
+    const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(()=>ctrl.abort(), 4000) : null;
+    const res = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(key),
+                            ctrl ? {signal:ctrl.signal} : undefined);
+    if(timer) clearTimeout(timer);
     if(res.ok){
       const j = await res.json();
-      if(Array.isArray(j) && j[0]) ipaCache[key] = pickAmerican(j[0]);
+      if(Array.isArray(j) && j[0]){
+        ipaCache[key] = pickAmerican(j[0]);
+        rememberIPA(key, ipaCache[key]);
+      }
     }
-  }catch(e){ /* offline or rate limited — the respelling still shows */ }
+  }catch(e){ /* offline, aborted or rate limited — the respelling still shows */ }
   return ipaCache[key];
 }
 

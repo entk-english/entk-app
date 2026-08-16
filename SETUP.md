@@ -42,6 +42,24 @@ Supabase."* or *"Running in local mode."*
 **Never put the `service_role` / secret key in this file.** It bypasses every access rule
 in the schema, and this file ends up in a public repository.
 
+### Email limits, and how to lift them
+
+Supabase's built-in mail service is for development: roughly **3–4 messages an hour for the
+whole project**, shared. Signing up a few trainees in one sitting hits it and the app reports
+*email rate limit exceeded* — nothing is wrong with the account, the mail simply was not sent.
+
+Two ways out.
+
+**Now, free:** turn confirmation off (below). No mail is sent at signup, so no limit applies.
+
+**Properly, if you want confirmation on:** give Supabase your own mail provider.
+*Project Settings → Authentication → SMTP Settings → Enable custom SMTP.* Any of these has a
+free tier far above the built-in limit — Resend (3,000 a month), Brevo (300 a day), Mailgun,
+Postmark, or a Gmail account with an app password. Paste the host, port, username and
+password from the provider, set the sender address to one on a domain you control, and save.
+Then *Authentication → Rate Limits* lets you raise the per-hour email cap, which stays low
+until custom SMTP is configured.
+
 ### Turn off email confirmation
 
 **Authentication → Sign In / Providers → Email → Confirm email → off → Save.**

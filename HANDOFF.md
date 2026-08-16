@@ -12,7 +12,7 @@ Paste this whole file into a new session to pick up exactly where the last one s
 | **Live site** | https://entk-english.github.io/entk-app/ |
 | **Repo** | https://github.com/entk-english/entk-app (public — Pages needs public on the free plan) |
 | **Branch** | `main` |
-| **Current build** | `b34` (shown at the bottom of the sign-in card) |
+| **Current build** | `b35` (shown at the bottom of the sign-in card) |
 | **Diagnostic page** | https://entk-english.github.io/entk-app/mic-check.html |
 
 ### Files

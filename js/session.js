@@ -338,6 +338,13 @@ async function advance(direction) {
 let publishTimer = null;
 function publish(display) {
   S.data.display = Object.assign({ at: Date.now() }, display);
+  /* Down the wire immediately, so their screen turns over at the same
+     moment yours does; the database write follows and is what a trainee
+     joining late or reloading reads. This is also why the poll on their
+     side can be slow — the wire, not the poll, is what makes it feel
+     live, and a slow poll is what keeps a room full of trainees from
+     hammering the database. */
+  if (link) link.send('display', { display: S.data.display, idx: S.idx, stages: S.stages });
   clearTimeout(publishTimer);
   publishTimer = setTimeout(() => { persist(); }, 350);
 }
@@ -390,13 +397,17 @@ function stageWarmup(body) {
   const card = el('<div class="card"></div>');
   body.appendChild(card);
 
-  function drawFormat() {
+  /* A prompt can be picked at random, or named outright — writing one
+     and watching the bank shuffle to something else was the old
+     behaviour, and it looked exactly like the trainee's screen ignoring
+     what you had just typed. */
+  function drawFormat(forced) {
     const def = WARMUP_FORMATS.find(f => f.id === format);
     const mine = ownPrompts(format);
     const bank = forLevel(WARMUPS[format], level).concat(mine);
     S.data.warmup = { id: format, format: def.name };
 
-    const shown = pickOne(bank) || '';
+    const shown = forced || pickOne(bank) || '';
     let promptHTML;
     if (format === 'chain') {
       promptHTML = 'Start the chain with: <b style="color:var(--accent)">' + esc(shown) + '</b>';
@@ -413,12 +424,14 @@ function stageWarmup(body) {
       '<div class="row" style="margin-top:14px"><button class="btn sm" data-again>Next prompt</button>' +
       '<span class="badge">' + bank.length + ' in the pool</span>' +
       '<span class="badge">rotation suggests: ' + esc(rotation.name) + '</span></div>' +
-      '<div class="field" style="margin-top:16px"><label>Add your own — it joins this trainee&#39;s rotation</label>' +
-        '<div class="row"><input id="own-in" placeholder="Type a prompt and press Enter" style="flex:1;min-width:220px">' +
-        '<button class="btn sm" data-addown>Add</button></div></div>' +
+      '<div class="field" style="margin-top:16px"><label>Your own question or sentence — it goes straight to their screen</label>' +
+        '<div class="row"><input id="own-in" placeholder="Type it and press Enter" style="flex:1;min-width:220px">' +
+        '<button class="btn sm" data-addown>Send &amp; keep</button>' +
+        '<button class="btn ghost sm" data-sendown>Send once</button></div></div>' +
       (mine.length
-        ? '<div class="chips">' + mine.map((p, i) =>
-            '<span class="chip gold">' + esc(p) +
+        ? '<div class="eyebrow" style="margin-top:6px">Yours — tap one to put it on their screen</div>' +
+          '<div class="chips">' + mine.map((p, i) =>
+            '<span class="chip gold" data-useown="' + i + '">' + esc(p) +
             ' <button data-delown="' + i + '" title="remove" style="background:none;border:none;color:inherit;cursor:pointer;padding:0 0 0 5px">×</button></span>'
           ).join('') + '</div>'
         : '');
@@ -428,24 +441,33 @@ function stageWarmup(body) {
     $$('[data-f]', card).forEach(c => c.onclick = () => { format = c.dataset.f; drawFormat(); });
     $('[data-again]', card).onclick = drawFormat;
 
-    const addOwn = () => {
+    const addOwn = (keep) => {
       const box = $('#own-in', card);
       const text = box.value.trim();
       if (!text) return;
-      saveOwnPrompts(format, ownPrompts(format).concat([text]));
+      if (keep) saveOwnPrompts(format, ownPrompts(format).concat([text]));
       box.value = '';
-      drawFormat();
-      toast('Added — it is in the rotation now.');
+      /* the one just written is the one they see — no reshuffle */
+      drawFormat(text);
+      toast(keep ? 'On their screen, and kept for next time.' : 'On their screen.');
     };
-    $('[data-addown]', card).onclick = addOwn;
+    $('[data-addown]', card).onclick = () => addOwn(true);
+    $('[data-sendown]', card).onclick = () => addOwn(false);
     $('#own-in', card).addEventListener('keydown', e => {
-      if (e.key === 'Enter') { e.preventDefault(); addOwn(); }
+      if (e.key === 'Enter') { e.preventDefault(); addOwn(true); }
     });
-    $$('[data-delown]', card).forEach(b => b.onclick = () => {
+    $$('[data-useown]', card).forEach(chip => chip.onclick = (e) => {
+      if (e.target.dataset.delown !== undefined) return;   // the × is its own button
+      const list = ownPrompts(format);
+      const p = list[+chip.dataset.useown];
+      if (p) { drawFormat(p); toast('On their screen.'); }
+    });
+    $$('[data-delown]', card).forEach(b => b.onclick = (e) => {
+      e.stopPropagation();
       const list = ownPrompts(format);
       list.splice(+b.dataset.delown, 1);
       saveOwnPrompts(format, list);
-      drawFormat();
+      drawFormat(shown);
     });
   }
 
@@ -1299,6 +1321,12 @@ function stagePicture(body) {
       '<button class="btn" data-new>New picture</button>' +
       '<button class="btn gold" data-talk>Start the clock</button>' +
       '<div class="timer" id="p-clock" style="font-size:32px">' + mmss(pictureSeconds()) + '</div>' +
+      '<div class="row" style="gap:6px">' +
+        '<input id="p-mins" type="number" min="1" max="60" step="1" title="Minutes for this picture" ' +
+          'value="' + (Math.round(pictureSeconds() / 60 * 10) / 10) + '" style="width:76px">' +
+        '<span class="sub" style="margin:0">min</span>' +
+        '<button class="btn ghost sm" data-setmins>Set</button>' +
+      '</div>' +
       '<span class="spacer"></span><span class="sub" id="p-credit" style="margin:0"></span>' +
     '</div>' +
     '<div id="p-holder"><div class="empty">Tap “New picture” to pull one.</div></div>' +
@@ -1347,6 +1375,20 @@ function stagePicture(body) {
   };
   $('[data-useurl]', card).onclick = useTyped;
   $('#p-url', card).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); useTyped(); } });
+
+  /* Set the length right here rather than up in the bar: this is the
+     drill where a trainer decides mid-lesson to give them longer. */
+  $('[data-setmins]', card).onclick = () => {
+    const mins = Number($('#p-mins', card).value);
+    if (!(mins > 0)) { toast('Give it a number of minutes.', 'err'); return; }
+    S.data.targets[S.stages[S.idx]] = Math.round(mins * 60);
+    $('#p-clock', card).textContent = mmss(pictureSeconds());
+    /* the bar above says the same thing, so it must not disagree */
+    const label = $('[data-settarget]');
+    if (label) label.textContent = 'suggested ' + fmtTarget(pictureSeconds()) + ' · edit';
+    persist();
+    toast('This picture now runs ' + mins + ' min.');
+  };
 
   let pt = null;
   $('[data-talk]', card).onclick = () => {
