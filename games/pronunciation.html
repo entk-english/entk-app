@@ -635,37 +635,16 @@ if(SR){
   };
   recognition.onerror = e=>{
     stopListening();
+    /* The recogniser is only a hint now, so its failures are not the
+       trainee's failures and must not read like one. The recording is
+       what matters, and it is made regardless. */
     if(e.error==='not-allowed') setStatus('🎤 Microphone blocked — allow mic access in the browser, then try again.');
-    else if(e.error==='no-speech') setStatus('I didn\'t hear anything — tap the mic and speak clearly.');
-    else setStatus('Mic error ('+e.error+') — tap the mic to retry.');
+    else setStatus('Recorded. Play it back with <b>▶ My recording</b> — your trainer decides the hit.');
   };
   recognition.onend = ()=>{
     stopListening();
-    if(gotResult){ emptyRuns = 0; return; }
-    emptyRuns++;
-    /* Two silent runs while a second capture is open is the classic
-       Windows device-contention symptom: the recording comes out
-       perfectly and the recogniser is handed silence. Drop the
-       recording first — it is the cheaper suspect — and only blame the
-       network if it keeps happening without one. */
-    if(emptyRuns >= 2 && recordPlayback){
-      recordPlayback = false;
-      const box = document.getElementById('recToggle');
-      if(box) box.checked = false;
-      emptyRuns = 0;
-      setStatus('Nothing came back twice. Voice recording is now off — it can starve the ' +
-                'recogniser on some machines. Tap the mic and say <b>' + current().word + '</b> again.');
-      return;
-    }
-    if(emptyRuns >= 2 && speechMode === 'cloud'){
-      const offer = document.getElementById('localBtn');
-      setStatus(offer && offer.style.display !== 'none'
-        ? 'Nothing is coming back from the recogniser — tap <b>Use offline speech</b> below.'
-        : 'The recogniser is returning nothing. This is usually the browser, not you — '+
-          'try opening this page in <b>Microsoft Edge</b>.');
-    }else{
-      setStatus('Didn\'t catch that — tap the mic and try again.');
-    }
+    if(gotResult) return;
+    setStatus('Recorded. Play it back with <b>▶ My recording</b> — your trainer decides the hit.');
   };
 }else{
   micBtn.disabled = true;
@@ -879,6 +858,17 @@ function norm(s){ return String(s).toLowerCase().replace(/[^a-z]/g,''); }
 /* Turn the recognizer's alternatives into a 0-100 pronunciation score.
    Exact top match with high confidence scores best; finding the word only
    in lower-ranked alternatives means it was said unclearly. */
+/* ------------------------------------------------------------
+   THE RECOGNISER DOES NOT PLAY THE GAME
+
+   It transcribes, and its language model snaps a mispronounced word
+   onto the nearest real one, so it cannot tell a good vowel from a bad
+   one. Letting it land hits meant the fight reacted to a machine that
+   was often wrong, in front of the trainee. So a spoken attempt now
+   does exactly two things: it records, so the trainee can hear
+   themselves, and it passes its guess up to the trainer's screen as a
+   hint. The monster does not move until the trainer decides.
+   ------------------------------------------------------------ */
 function scoreAttempt(alts){
   const target = norm(current().word);
   let pct = 0, heard = alts[0] ? alts[0].text : '';
@@ -901,6 +891,7 @@ function scoreAttempt(alts){
     for(let i=0;i<Math.min(h.length,target.length);i++) if(h[i]===target[i]) same++;
     pct = Math.round(Math.max(0, Math.min(44, (same/Math.max(1,target.length))*44)));
   }
+  state.lastPct = pct;      // kept for the record, shown to nobody
   handleAttempt(pct, heard);
 }
 
@@ -910,27 +901,16 @@ function starsFor(pct){ return pct>=88?3 : pct>=72?2 : pct>=52?1 : 0; }
    the BEST score is what counts — the point is to reach a correct American
    pronunciation, not to punish the first try. Only a fully used-up set of
    attempts with no passing score lets the boss strike. */
+/* An attempt is banked, never judged here. No score on screen, no hit,
+   no sound of failure — the trainee is told the take is saved and that
+   their trainer is listening, which is the truth. */
 function handleAttempt(pct, heard){
-  const entry = current();
   state.attempt++;
   state.lastHeard = heard;
   if(pct > state.bestPct) state.bestPct = pct;
-
-  const passed = starsFor(pct) > 0;
-  const outOfTries = state.attempt >= MAX_ATTEMPTS;
-
-  if(!passed && !outOfTries){
-    // give a precise correction and let them go again — no damage yet
-    const why = diagnose(entry.word, heard);
-    const left = MAX_ATTEMPTS - state.attempt;
-    setStatus('❌ '+pct+'% — heard "<b>'+(heard||'…')+'</b>". '+
-              (why||entry.rule.tip)+' <b>'+left+' tr'+(left===1?'y':'ies')+' left.</b>');
-    sfx('miss');
-    micBtn.classList.add('retry');
-    return;   // stay on the same word
-  }
   micBtn.classList.remove('retry');
-  applyResult(state.bestPct, heard, entry);
+  setStatus('Recorded. Play it back with <b>▶ My recording</b>, or say <b>' +
+            current().word + '</b> again. Your trainer decides the hit.');
 }
 
 /* ------------------------------------------------------------
@@ -991,6 +971,8 @@ function snapshot(){
     combo: state.combo, score: state.score, cleared: state.cleared || 0,
     attempt: state.attempt, running: state.running, busy: state.busy,
     count: state.entries.length, word: current().word,
+    /* the recogniser's guess is a hint for the trainer's screen only */
+    heard: state.lastHeard || '',
     status: document.getElementById('statusLine').innerHTML
   };
 }
@@ -1040,6 +1022,7 @@ function applySnapshot(s){
   state.heroHP = s.heroHP; state.heroMax = s.heroMax || 100;
   state.combo = s.combo; state.score = s.score;
   state.cleared = s.cleared; state.attempt = s.attempt;
+  state.lastHeard = s.heard || '';
   state.running = s.running; state.busy = s.busy;
   if(s.bossHP <= 0 && !bossAnim.dead){ bossAnim.dead = 1; deathT = 1; }
   if(s.status) setStatus(s.status);

@@ -12,7 +12,7 @@ Paste this whole file into a new session to pick up exactly where the last one s
 | **Live site** | https://entk-english.github.io/entk-app/ |
 | **Repo** | https://github.com/entk-english/entk-app (public — Pages needs public on the free plan) |
 | **Branch** | `main` |
-| **Current build** | `b29` (shown at the bottom of the sign-in card) |
+| **Current build** | `b30` (shown at the bottom of the sign-in card) |
 | **Diagnostic page** | https://entk-english.github.io/entk-app/mic-check.html |
 
 ### Files
@@ -122,9 +122,18 @@ each heading, a patterned prompt box, the stage bar redrawn as a route with a pu
 current stage, and lift on buttons, chips and rows. All of it off under
 `prefers-reduced-motion`.
 
+## The recogniser does not play the game (b30)
+
+A spoken attempt records and nothing else. No percentage, no stars, no damage, no failure
+sound, and the trainee never sees the transcript. The recording exists so they can hear
+themselves back; the guess is passed up to the trainer's screen as a hint under "Recogniser
+guessed". Only ✓ Correct / ✗ Wrong — now sitting in a bar directly under the game monitor,
+where the trainer is already looking — moves anything. Fixing the recogniser is a separate
+job and the game no longer waits on it.
+
 ## What is left
 
-**3c — recognition scores 0%.** Playback proves the audio recorded, so capture works and the
+**3c — recognition scores 0%.** No longer blocks a lesson, since nothing depends on it. Playback proves the audio recorded, so capture works and the
 recogniser returns nothing. `mic-check.html` now has section **5b**, which runs recognition
 with a MediaRecorder beside it — exactly what the game does. If section 4 hears you and 5b
 does not, the second capture is starving the recogniser, which is the classic Windows

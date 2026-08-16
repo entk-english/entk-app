@@ -538,13 +538,10 @@ function stagePron(body) {
       '<div class="row between" style="margin-bottom:14px">' +
         '<div><div class="eyebrow">Now saying</div>' +
         '<div id="cw" style="font-size:34px;font-weight:800;letter-spacing:-0.5px"></div></div>' +
-        '<div class="row">' +
-          '<button class="btn" data-good style="font-size:17px;padding:14px 30px">✓ Correct</button>' +
-          '<button class="btn danger" data-bad style="font-size:17px;padding:14px 30px">✗ Wrong</button>' +
-        '</div>' +
+        '<div><div class="eyebrow">Recogniser guessed</div>' +
+        '<div id="heard" style="font-size:17px;color:var(--muted)">—</div></div>' +
       '</div>' +
       '<div class="chips" id="wordline"></div>' +
-      '<p class="sub" style="margin:14px 0 0">Keys <b>1</b> correct · <b>2</b> wrong. The hit lands on your trainee\'s screen.</p>' +
     '</div>'
   );
   body.appendChild(panel);
@@ -573,9 +570,6 @@ function stagePron(body) {
     toast(good ? 'Correct — hit sent.' : 'Wrong — sent.', good ? 'ok' : 'err');
   };
 
-  $('[data-good]', panel).onclick = () => sendMark(true);
-  $('[data-bad]', panel).onclick = () => sendMark(false);
-
   /* ---- what the trainee actually said ----
      The attempt is captured on their device and uploaded to a private
      bucket; only the path travels down the wire. Playing it here is how
@@ -587,7 +581,7 @@ function stagePron(body) {
       '<div class="list" id="takes"></div>' +
     '</div>'
   );
-  body.appendChild(takes);
+  /* appended below the game and the verdict bar, further down */
 
   const takeList = $('#takes', takes);
   S.data.pron.recordings = S.data.pron.recordings || [];
@@ -645,6 +639,12 @@ function stagePron(body) {
     if (msg.type === 'recording-failed') {
       toast('Their device could not upload "' + msg.word + '": ' + msg.reason, 'err');
     }
+    /* The recogniser is a hint on this screen and nothing more — it
+       lands no hits and the trainee never sees it. */
+    if (msg.type === 'gamestate' && msg.s) {
+      const h = $('#heard', panel);
+      if (h) h.textContent = msg.s.heard ? '“' + msg.s.heard + '”' : '—';
+    }
   };
 
   const keyMark = (e) => {
@@ -662,6 +662,28 @@ function stagePron(body) {
   body.appendChild(el('<p class="sub" style="margin:18px 0 6px">What your trainee sees — mirrored from their device</p>'));
   body.appendChild(frame);
   S.monitor = frame;
+
+  /* The verdict sits directly under the game, where the trainer is
+     already looking. Nothing on the trainee's screen moves until one of
+     these is pressed: their microphone records and plays back, and that
+     is all it does. */
+  const verdictBar = el(
+    '<div class="card tight" style="margin-top:12px">' +
+      '<div class="row between">' +
+        '<div class="sub" style="margin:0">Nothing happens in the game until you decide. ' +
+        'Keys <b>1</b> correct · <b>2</b> wrong.</div>' +
+        '<div class="row">' +
+          '<button class="btn" data-good style="font-size:18px;padding:15px 34px">✓ Correct</button>' +
+          '<button class="btn danger" data-bad style="font-size:18px;padding:15px 34px">✗ Wrong</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>'
+  );
+  body.appendChild(verdictBar);
+  $('[data-good]', verdictBar).onclick = () => sendMark(true);
+  $('[data-bad]', verdictBar).onclick = () => sendMark(false);
+  body.appendChild(takes);
+
   S.onLeave = () => { document.removeEventListener('keydown', keyMark); S.monitor = null; };
 
   S.data.pron = S.data.pron || { words };

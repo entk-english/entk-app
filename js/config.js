@@ -34,4 +34,4 @@ export const APP_NAME = 'Antoch Session Trainer';
 
 /* Bumped whenever the app files change. Shown on the sign-in screen
    so a stale browser cache is obvious rather than mysterious. */
-export const BUILD = 'b29';
+export const BUILD = 'b30';
