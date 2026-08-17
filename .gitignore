@@ -1,5 +1,5 @@
 # local backups exported from Settings
-antoch-backup-*.json
+entk-backup-*.json
 
 # editor and OS noise
 .DS_Store

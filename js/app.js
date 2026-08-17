@@ -141,7 +141,7 @@ function renderAuth() {
         '<button class="btn block" data-submit>' + (tab === 'up' ? 'Create account' : 'Sign in') + '</button>' +
         (Store.mode === 'local'
           ? '<div class="notice info" style="margin-top:16px">Running in <b>local mode</b> — data stays in this browser and cloud invite codes will not work here.' +
-            (tab === 'in' ? ' First run: <b>admin@antoch.local</b> / <b>antoch</b>. Change that password straight away.' : '') + '</div>'
+            (tab === 'in' ? ' First run: <b>admin@entk.local</b> / <b>entk</b>. Change that password straight away.' : '') + '</div>'
           : '<div class="notice ok" style="margin-top:16px">Connected to Supabase.</div>') +
         /* A capability probe rather than a version string: a browser
            serving a cached older store.js will be missing functions
@@ -1255,7 +1255,7 @@ async function viewSettings(body) {
       '<button class="btn sm ghost" data-imp>Import JSON</button>' +
       '<input type="file" accept="application/json" id="s-file" class="hidden"></div></div>');
     $('[data-exp]', backup).onclick = () =>
-      downloadText('antoch-backup-' + new Date().toISOString().slice(0, 10) + '.json', Store.exportAll());
+      downloadText('entk-backup-' + new Date().toISOString().slice(0, 10) + '.json', Store.exportAll());
     $('[data-imp]', backup).onclick = () => $('#s-file', backup).click();
     $('#s-file', backup).onchange = async e => {
       const file = e.target.files[0];

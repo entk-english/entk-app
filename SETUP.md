@@ -1,4 +1,4 @@
-# Setting up Antoch Session Trainer
+# Setting up Entk Session Trainer
 
 **This copy is already configured.** `js/config.js` holds a live Supabase project and an
 Unsplash key, the database schema has been applied, and an administrator account exists.
@@ -82,7 +82,7 @@ administrator yet. So the very first code is inserted by hand.
 1. **SQL Editor**, once:
 
    ```sql
-   insert into invites (code, role) values ('ANTOCHADMIN', 'admin');
+   insert into invites (code, role) values ('ENTKADMIN', 'admin');
    ```
 
    Use a code with no ambiguous characters. `START1` looks fine until you realise the last

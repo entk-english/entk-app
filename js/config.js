@@ -25,13 +25,13 @@ export const UNSPLASH_ACCESS_KEY = 'pl8JjOs3LBCCR-WthLoKQuUGMqiOefaZOyKQM8-vbUE'
 /* Seed administrator used the first time the app runs in local
    mode. Change the password immediately from Settings. */
 export const SEED_ADMIN = {
-  email: 'admin@antoch.local',
-  password: 'antoch',
+  email: 'admin@entk.local',
+  password: 'entk',
   name: 'Administrator'
 };
 
-export const APP_NAME = 'Antoch Session Trainer';
+export const APP_NAME = 'Entk Session Trainer';
 
 /* Bumped whenever the app files change. Shown on the sign-in screen
    so a stale browser cache is obvious rather than mysterious. */
-export const BUILD = 'b37';
+export const BUILD = 'b38';

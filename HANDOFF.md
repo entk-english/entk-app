@@ -1,4 +1,4 @@
-# Antoch Session Trainer — handoff
+# Entk Session Trainer — handoff
 
 Paste this whole file into a new session to pick up exactly where the last one stopped.
 
@@ -88,7 +88,7 @@ is stored on it. Message types in use:
   repo on purpose — it is a bearer credential and this repository is public. Create a fresh
   read token at https://huggingface.co/settings/tokens and paste it into the session that
   needs it. Free monthly credits ran out after 8 of 11 sprites and reset monthly.
-- **Admin login**: the account created with the `ANTOCHADMIN` code. Invite codes are issued
+- **Admin login**: the account created with the `ENTKADMIN` code. Invite codes are issued
   from *People & access*; trainees join with the six-character code on their trainee card.
 
 **Run lessons in Microsoft Edge.** Chrome's speech recogniser is broken on this machine —

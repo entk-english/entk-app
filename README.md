@@ -1,4 +1,4 @@
-# Antoch Session Trainer
+# Entk Session Trainer
 
 A one-on-one English conversation coaching platform: a live session runner for the
 trainer, a set of CEFR-tiered drills, and a history that makes recurring problems visible
