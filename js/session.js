@@ -350,13 +350,15 @@ function publish(display) {
 
 async function pushLive() {
   if (!S) return;
+  /* The plan is carried in so the write is one round trip, and so the
+     rest of the plan — stage 4, extras, topic — survives the merge. */
+  const plan = Object.assign({}, S.record.plan);
+  delete plan.live;
   try {
     const ok = await Store.updateLive(S.record.id, {
       display: S.data.display, stage_index: S.idx, stage_list: S.stages, at: Date.now()
-    });
-    /* No live column on this project yet: the display still has to
-       reach a trainee who reloads, so fall back to the record. */
-    if (!ok) persist();
+    }, plan);
+    if (!ok) persist();   // the wire already delivered it; this is the backup
   } catch (e) { persist(); }
 }
 
@@ -388,8 +390,11 @@ async function flush() {
 async function finish() {
   S.data.feedback.text = buildNote();
   clearTimeout(persistTimer); persistTimer = null; persistPending = false;
+  /* the live payload rides in the plan, so it is cleared there */
+  const plan = Object.assign({}, S.record.plan);
+  delete plan.live;
   await Store.updateSession(S.record.id, {
-    data: S.data, live: {}, ended_at: new Date().toISOString()
+    data: S.data, plan: plan, ended_at: new Date().toISOString()
   });
   cleanup();
   toast('Session saved.');
@@ -787,7 +792,27 @@ function stagePron(body) {
   };
   paintTakes();
 
+  /* Audio arriving down the wire in pieces, because this project has no
+     storage bucket. Held until the last piece lands, then turned back
+     into something playable. */
+  const partials = {};
+
   S.onLink = (msg) => {
+    if (msg.type === 'recording-chunk') {
+      const p = partials[msg.id] || (partials[msg.id] = { parts: [], got: 0 });
+      if (p.parts[msg.i] === undefined) { p.parts[msg.i] = msg.part; p.got++; }
+      if (p.got < msg.total) return;
+      delete partials[msg.id];
+      try {
+        const bin = atob(p.parts.join(''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        memTakes.push({ blob: new Blob([bytes], { type: msg.type || 'audio/webm' }),
+                        word: msg.word, at: msg.at || Date.now() });
+        paintTakes();
+      } catch (e) { toast('A recording arrived damaged.', 'err'); }
+      return;
+    }
     if (msg.type === 'recording') {
       const take = { word: msg.word, at: msg.at || Date.now() };
       if (msg.path) {

@@ -455,12 +455,20 @@ Store.createSession = async function ({ trainee_id, trainer_id, plan }) {
   return data;
 };
 
-/* The trainee's live view asks this and nothing else: the newest
-   unfinished session for one trainee, and only the columns that decide
-   what is on their screen. `data` is deliberately absent — it is the
-   large, slow-changing half, and pulling it every few seconds for every
-   trainee in the building is what made a room of three feel like a room
-   of thirty. */
+/* ---------------- the live half of a session ----------------
+   The trainee's screen needs two things: which stage, and what the
+   trainer published for it. That is a few hundred bytes. `data` is the
+   other half — harvest, every drill's answers, recording paths, the
+   note — and it grows all lesson; pulling it every few seconds for
+   every trainee in the building is what made a room of three feel like
+   a room of thirty.
+
+   It lives inside `plan`, which already exists and is small, rather
+   than in a column of its own. A column would be tidier, but adding one
+   needs a database migration run by hand in the Supabase dashboard, and
+   an app that only works after someone remembers to do that is an app
+   that does not work. `plan.live` needs nothing run, anywhere. */
+
 Store.liveSession = async function (traineeId) {
   if (Store.mode === 'local') {
     const rows = read(LS.sessions)
@@ -468,45 +476,34 @@ Store.liveSession = async function (traineeId) {
       .sort((a, b) => (b.started_at || '').localeCompare(a.started_at || ''));
     return rows[0] || null;
   }
-  /* supabase-live-column.sql may not have been run yet. The first
-     failure says so, and everything falls back to the old whole-record
-     path rather than leaving the trainee staring at nothing. */
-  if (!Store.noLiveColumn) {
-    const { data, error } = await Store.sb
-      .from('sessions')
-      .select('id,trainee_id,started_at,ended_at,live')
-      .eq('trainee_id', traineeId)
-      .is('ended_at', null)
-      .order('started_at', { ascending: false })
-      .limit(1);
-    if (!error) return (data && data[0]) || null;
-    Store.noLiveColumn = true;
-  }
   const { data, error } = await Store.sb
     .from('sessions')
-    .select('*')
+    .select('id,trainee_id,started_at,ended_at,plan')
     .eq('trainee_id', traineeId)
     .is('ended_at', null)
     .order('started_at', { ascending: false })
     .limit(1);
   if (error) throw new Error(error.message);
-  return (data && data[0]) || null;
+  const row = (data && data[0]) || null;
+  if (row) row.live = (row.plan && row.plan.live) || {};
+  return row;
 };
 
-/* The small half, written often. Kept separate from updateSession so a
-   fast-moving stage never rewrites the whole record. */
-Store.updateLive = async function (id, live) {
+/* Written often, so it carries the plan it is merged into rather than
+   reading it back first: one small round trip instead of two. */
+Store.updateLive = async function (id, live, plan) {
   if (Store.mode === 'local') {
     const rows = read(LS.sessions);
     const i = rows.findIndex(s => s.id === id);
-    if (i < 0) return null;
+    if (i < 0) return false;
+    rows[i].plan = Object.assign({}, rows[i].plan, { live: live });
     rows[i].live = live;
     write(LS.sessions, rows);
-    return rows[i];
+    return true;
   }
-  if (Store.noLiveColumn) return false;
-  const { error } = await Store.sb.from('sessions').update({ live: live }).eq('id', id);
-  if (error) { Store.noLiveColumn = true; return false; }
+  const merged = Object.assign({}, plan || {}, { live: live });
+  const { error } = await Store.sb.from('sessions').update({ plan: merged }).eq('id', id);
+  if (error) return false;
   return true;
 };
 
@@ -545,13 +542,18 @@ Store.deleteSession = async function (id) {
 const RECORDINGS_BUCKET = 'recordings';
 
 Store.uploadRecording = async function (traineeId, sessionId, word, blob) {
-  if (Store.mode === 'local') return null;
+  if (Store.mode === 'local' || Store.noBucket) return null;
   const safe = String(word || 'word').toLowerCase().replace(/[^a-z0-9]/g, '') || 'word';
   const ext = /ogg/.test(blob.type) ? 'ogg' : /mp4/.test(blob.type) ? 'mp4' : 'webm';
   const path = traineeId + '/' + sessionId + '/' + Date.now() + '-' + safe + '.' + ext;
   const { error } = await Store.sb.storage.from(RECORDINGS_BUCKET)
     .upload(path, blob, { contentType: blob.type || 'audio/webm', upsert: false });
-  if (error) throw new Error(error.message);
+  if (error) {
+    /* The bucket was never created. Stop asking on every take — the
+       caller sends the audio down the wire instead. */
+    if (/bucket not found/i.test(error.message)) { Store.noBucket = true; return null; }
+    throw new Error(error.message);
+  }
   return path;
 };
 

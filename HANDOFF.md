@@ -30,8 +30,7 @@ js/ui.js                   DOM helpers — note $ is one element, $$ is a list
 games/pronunciation.html   the game; #r=<base64> word list, #mark=1 marking, #monitor=1 mirror
 games/sprites/*.png        8 generated character sprites, transparent
 supabase-schema.sql        schema and row level security
-supabase-recordings.sql    the private recordings bucket and its policies — run once
-supabase-live-column.sql   the small `live` column and its index — run once
+supabase-recordings.sql    optional: a private bucket so recordings outlive the lesson
 mic-check.html             microphone / speech diagnostic
 mirror-test.html           player and mirror side by side, no second device needed
 load-check.html            counts storage calls and payload sizes for a simulated lesson
@@ -53,8 +52,14 @@ Three people in a lesson was enough to feel it. Three causes, all fixed:
    is now the safety net: one query a minute while the channel is alive, back to every three
    seconds when it goes quiet, and nothing at all while the tab is hidden.
 
-If `supabase-live-column.sql` has not been run, `Store.noLiveColumn` trips on the first
-failure and everything falls back to the old whole-record path rather than breaking.
+**Nothing has to be run in the dashboard for any of this.** The live payload lives inside
+`plan`, which already exists and is small, rather than in a column of its own — a column
+would be tidier, but an app that only performs after someone remembers to run a migration is
+an app that does not perform. Likewise the recordings: if the `recordings` bucket exists the
+audio is uploaded and the path travels, and if it does not, `Store.noBucket` trips once and
+the audio goes down the wire in base64 chunks instead. The only thing the bucket buys is
+recordings that outlive the lesson, which is why `supabase-recordings.sql` is still in the
+repo and still optional.
 
 ### The live channel
 

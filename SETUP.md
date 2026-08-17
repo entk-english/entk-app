@@ -30,18 +30,17 @@ Supabase."* or *"Running in local mode."*
    pick the nearest region. Wait for provisioning.
 3. **SQL Editor → New query**. Paste the whole of `supabase-schema.sql` and press **Run**.
    Expect *Success. No rows returned*.
-4. **SQL Editor → New query** again. Paste `supabase-recordings.sql` and **Run**. This
-   creates the private bucket the trainee's pronunciation attempts are uploaded to, so the
-   trainer can play them back from their own device. Skip it and the app still runs — the
-   trainer simply sees "could not upload" where a recording should be.
-5. **SQL Editor → New query** once more. Paste `supabase-live-column.sql` and **Run**. This
-   adds the small `live` column the trainee's screen reads from, and the index behind it.
-   Without it the app still works, but every trainee's page pulls the whole session record
-   every few seconds, which is what a room of more than two or three can feel.
-6. **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
+4. *Optional.* **SQL Editor → New query** again, paste `supabase-recordings.sql` and **Run**.
+   This creates a private bucket for the trainee's pronunciation attempts. Without it the app
+   still works and the trainer still hears every take — the audio travels over the live
+   channel instead. The bucket only buys recordings that outlive the lesson.
+5. **Project Settings → API**. Copy the **Project URL** and the **anon / public** key.
    Newer dashboards label these under **API Keys** with the anon key called
    **publishable** (`sb_publishable_...`). Either form works.
-7. Paste both into `js/config.js`.
+6. Paste both into `js/config.js`.
+
+Nothing else needs running. The app never requires a migration to perform well — the
+fast-changing live payload rides inside the `plan` column the schema already has.
 
 **Never put the `service_role` / secret key in this file.** It bypasses every access rule
 in the schema, and this file ends up in a public repository.

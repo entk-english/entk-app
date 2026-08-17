@@ -664,13 +664,54 @@ async function sendRecording(m) {
     liveLink.send('recording', { blob: m.blob, word: m.word, at: m.at });
     return;
   }
-  if (!liveTraineeId || !liveLinkId) return;
+  if (liveTraineeId && liveLinkId) {
+    try {
+      const path = await Store.uploadRecording(liveTraineeId, liveLinkId, m.word, m.blob);
+      if (path) { liveLink.send('recording', { path, word: m.word, at: m.at }); return; }
+    } catch (e) { /* no bucket, or no permission — the wire will do */ }
+  }
+  await sendRecordingOverWire(m);
+}
+
+/* No storage bucket on this project, and creating one needs somebody in
+   the Supabase dashboard. The audio goes down the same wire everything
+   else uses instead: base64, in chunks, reassembled on the trainer's
+   side. It does not outlive the lesson, which is the price of needing
+   nothing set up. A few seconds of speech is 20-60 KB. */
+const WIRE_CHUNK = 80000;      // comfortably inside a broadcast payload
+const WIRE_MAX = 900000;       // ~40 seconds of webm; past that, refuse
+
+async function sendRecordingOverWire(m) {
   try {
-    const path = await Store.uploadRecording(liveTraineeId, liveLinkId, m.word, m.blob);
-    liveLink.send('recording', { path, word: m.word, at: m.at });
+    const b64 = await blobToBase64(m.blob);
+    if (b64.length > WIRE_MAX) {
+      liveLink.send('recording-failed', { word: m.word, reason: 'that take is too long to send' });
+      return;
+    }
+    const id = Math.random().toString(36).slice(2, 9);
+    const total = Math.ceil(b64.length / WIRE_CHUNK);
+    for (let i = 0; i < total; i++) {
+      liveLink.send('recording-chunk', {
+        id, i, total, word: m.word, at: m.at,
+        type: m.blob.type || 'audio/webm',
+        part: b64.slice(i * WIRE_CHUNK, (i + 1) * WIRE_CHUNK)
+      });
+      /* a breath between chunks: the channel is shared with marks and
+         game state, and those matter more than a byte of audio */
+      if (total > 1) await new Promise(r => setTimeout(r, 60));
+    }
   } catch (e) {
     liveLink.send('recording-failed', { word: m.word, reason: e.message });
   }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = () => reject(new Error('could not read the recording'));
+    fr.readAsDataURL(blob);
+  });
 }
 
 /* The word form drill is typed here and marked there. The boxes live on
