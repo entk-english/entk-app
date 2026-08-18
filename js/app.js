@@ -58,28 +58,7 @@ export async function render() {
 
 function go(hash) { location.hash = hash; }
 
-/* ---------------- theme ---------------- */
-
-/* Light unless dark was explicitly chosen — the stylesheet's :root is
-   the light palette, so an absent attribute means light. */
-function currentTheme() {
-  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-}
-
-function toggleTheme() {
-  const next = currentTheme() === 'light' ? 'dark' : 'light';
-  document.documentElement.setAttribute('data-theme', next);
-  try { localStorage.setItem('ast:theme', next); } catch (e) {}
-  render();
-}
-
-function themeButton() {
-  const light = currentTheme() === 'light';
-  const b = el('<button class="themeBtn" title="Switch to ' + (light ? 'dark' : 'light') + ' theme">' +
-    (light ? '☾' : '☀') + '</button>');
-  b.onclick = toggleTheme;
-  return b;
-}
+/* The app is dark only — no switch, no stored preference. */
 
 function topbar(route) {
   const me = Store.me;
@@ -101,7 +80,6 @@ function topbar(route) {
       '<button class="btn ghost sm" data-out>Sign out</button>' +
     '</header>'
   );
-  bar.insertBefore(themeButton(), $('[data-out]', bar));
   $$('[data-go]', bar).forEach(b => b.onclick = () => go('#/' + b.dataset.go));
   $('[data-out]', bar).onclick = async () => { await Store.signOut(); location.hash = ''; render(); };
   return bar;
@@ -153,9 +131,6 @@ function renderAuth() {
     );
     wrap.appendChild(card);
 
-    const themeRow = el('<div class="row" style="justify-content:center;margin-top:14px"></div>');
-    themeRow.appendChild(themeButton());
-    card.appendChild(themeRow);
 
     $$('[data-tab]', card).forEach(b => b.onclick = () => { tab = b.dataset.tab; draw(); });
 

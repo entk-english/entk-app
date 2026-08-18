@@ -1,47 +1,15 @@
 /* =============================================================
    Entk Session Trainer
 
-   Two themes. Dark is the original; light exists because a dark
-   app shared over Google Meet in a bright room is hard to read.
-   Every surface colour is a token, so the light theme is a
-   palette swap rather than a pile of overrides.
+   One theme, dark, and one layout that works from a small phone up
+   to a shared desktop screen. Every surface colour is a token.
    ============================================================= */
 
-/* Light is the default — this is a tool used in daylight on a shared
-   screen, so it should not start by turning the room black. The
-   palette is deliberately cool: slate and steel rather than the
-   lavender the dark theme is built from, and never flat white. */
+/* Dark only. This is a coaching tool used on phones and shared screens
+   in the evening, and one look done properly beats two done half-way.
+   The light palette and the theme switch are gone; every token below is
+   the dark one, so nothing downstream had to change. */
 :root {
-  --bg: #eaeef4;
-  --bg-grad: radial-gradient(ellipse 80% 60% at 50% 0%, #dce6f2, transparent 70%),
-             radial-gradient(ellipse 60% 50% at 85% 100%, #d9e6ea, transparent 70%),
-             linear-gradient(180deg, #f4f7fb, #e4eaf2);
-  --panel: rgba(255, 255, 255, 0.88);
-  --sunken: #f7f9fc;
-  --sunken-soft: #eef2f8;
-  --line: #c3cfdd;
-  --line-soft: #dae2ec;
-  --accent: #0f766e;
-  --accent-ink: #ffffff;
-  --accent-deep: #0b574f;
-  --accent-wash: rgba(15, 118, 110, 0.10);
-  --accent-edge: rgba(15, 118, 110, 0.32);
-  --gold: #8a5a00;
-  --gold-ink: #ffffff;
-  --gold-wash: rgba(138, 90, 0, 0.09);
-  --gold-edge: rgba(138, 90, 0, 0.28);
-  --danger: #b3243c;
-  --danger-wash: rgba(179, 36, 60, 0.08);
-  --danger-edge: rgba(179, 36, 60, 0.3);
-  --text: #0f1c2e;
-  --muted: #4d5d73;
-  --shadow: 0 10px 28px rgba(30, 55, 90, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  --blur: none;
-  --radius: 14px;
-  --radius-lg: 20px;
-}
-
-html[data-theme="dark"] {
   --bg: #080418;
   --bg-grad: radial-gradient(ellipse 80% 60% at 50% 0%, #2a1a5c, transparent 70%),
              radial-gradient(ellipse 60% 50% at 85% 100%, #1d2a5e, transparent 70%),
@@ -67,6 +35,11 @@ html[data-theme="dark"] {
   --muted: #a996d6;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.07);
   --blur: blur(14px);
+  --radius: 14px;
+  --radius-lg: 20px;
+  --rule: rgba(150, 120, 255, 0.10);
+  --hatch: rgba(160, 130, 255, 0.16);
+  --sheen: rgba(255, 255, 255, 0.10);
 }
 
 * { box-sizing: border-box; }
@@ -209,6 +182,7 @@ select option { background: var(--sunken); color: var(--text); }
 
 .chips { display: flex; gap: 7px; flex-wrap: wrap; }
 .chip {
+  display: inline-block;
   background: var(--accent-wash);
   border: 1px solid var(--accent-edge);
   color: var(--accent); font-size: 12.5px; padding: 5px 12px;
@@ -410,12 +384,6 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var
 
 /* ---------------- small screens ---------------- */
 
-@media (max-width: 720px) {
-  .timer { font-size: 30px; min-width: 92px; }
-  .prompt-box { font-size: 20px; padding: 18px; }
-  .page { padding: 18px 14px 50px; }
-  .topbar { padding: 10px 14px; }
-}
 
 .hidden { display: none !important; }
 
@@ -429,17 +397,6 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var
    adds shape and pattern on top of them, so both themes gain the same
    character from their own palette.
    ============================================================= */
-
-:root {
-  --rule: rgba(15, 60, 110, 0.07);      /* the ruled grid on the backdrop */
-  --hatch: rgba(15, 60, 110, 0.10);     /* corner hatching on panels     */
-  --sheen: rgba(255, 255, 255, 0.55);
-}
-html[data-theme="dark"] {
-  --rule: rgba(150, 120, 255, 0.10);
-  --hatch: rgba(160, 130, 255, 0.16);
-  --sheen: rgba(255, 255, 255, 0.10);
-}
 
 /* ---- the surface: ruled paper, fading out downward ---- */
 body::after {
@@ -560,4 +517,154 @@ h1::after {
   body::after { animation: none; }
   .step.now { animation: none; }
   .btn:hover:not(:disabled), .item:hover, .chip:hover, .counter:hover { transform: none; }
+}
+
+/* =============================================================
+   PHONES
+
+   The app is used standing up, one-handed, on whatever phone the
+   trainee owns. Three rules hold the whole thing together:
+
+   - nothing has a fixed width; everything is allowed to wrap
+   - anything you tap is at least 44px tall, which is the smallest
+     target a thumb hits reliably
+   - the page never scrolls sideways — wide things (the stage bar, a
+     table, the game) scroll inside themselves instead
+
+   Sizes are fluid rather than stepped, so a 320px phone and a 430px
+   phone both get a layout suited to them instead of the same one.
+   ============================================================= */
+
+@media (max-width: 900px) {
+  html, body { overflow-x: hidden; }
+
+  /* room for the notch and the home bar on a modern phone */
+  .page {
+    padding: 16px clamp(12px, 4vw, 20px) calc(46px + env(safe-area-inset-bottom));
+    padding-left: max(clamp(12px, 4vw, 20px), env(safe-area-inset-left));
+    padding-right: max(clamp(12px, 4vw, 20px), env(safe-area-inset-right));
+  }
+
+  h1 { font-size: clamp(20px, 5.6vw, 26px); }
+  h2 { font-size: clamp(16px, 4.4vw, 19px); }
+  .sub { font-size: 13.5px; margin-bottom: 16px; }
+
+  /* the top bar becomes two rows: who you are, then where you can go */
+  .topbar {
+    flex-wrap: wrap; gap: 8px 10px;
+    padding: 10px max(12px, env(safe-area-inset-left)) 10px max(12px, env(safe-area-inset-right));
+  }
+  .topbar .logo { font-size: 15px; flex: 1; min-width: 0; }
+  .topbar nav {
+    order: 3; width: 100%;
+    overflow-x: auto; flex-wrap: nowrap;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .topbar nav::-webkit-scrollbar { display: none; }
+  .navlink { white-space: nowrap; min-height: 40px; }
+  .whoami { font-size: 12px; }
+  .whoami b { font-size: 13px; }
+
+  .card { padding: 16px clamp(13px, 4vw, 18px); border-radius: 16px; }
+  .card.tight { padding: 13px 14px; }
+  .card::after { display: none; }        /* the hatched corner is desktop jewellery */
+
+  /* one column for everything that was a grid of panels */
+  .grid.two, .grid.three, .stat-row, .counter-grid, .formgrid {
+    grid-template-columns: 1fr;
+  }
+  .counter-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+  .stat-row { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+
+  /* buttons a thumb can actually hit, and rows that wrap instead of
+     squeezing their contents into slivers */
+  .btn { min-height: 46px; padding: 12px 20px; font-size: 15px; flex: 1 1 auto; }
+  .btn.sm { min-height: 40px; padding: 9px 14px; font-size: 13.5px; flex: 0 1 auto; }
+  .row { gap: 8px; }
+  .row.between { gap: 10px; flex-wrap: wrap; }
+  /* a flex child refuses to shrink below its content unless told to,
+     which is how a line of word chips ends up clipped off-screen */
+  .row > *, .row.between > * { min-width: 0; }
+  .chips { flex-wrap: wrap; }
+  input, select, textarea { font-size: 16px; min-height: 46px; }   /* 16px stops iOS zooming on focus */
+  textarea { min-height: 96px; }
+  .chip { padding: 8px 14px; font-size: 13.5px; }
+  .themeBtn { width: 42px; height: 42px; }
+
+  .prompt-box {
+    font-size: clamp(17px, 4.8vw, 22px);
+    padding: 20px 16px; min-height: 92px; border-radius: 16px;
+  }
+  .prompt-box.small { font-size: 16px; padding: 15px; }
+
+  .timer { font-size: clamp(28px, 9vw, 40px); min-width: 0; }
+  .timer-target { font-size: 11.5px; }
+
+  /* the session bar: stages scroll across, controls wrap under */
+  .stagebar {
+    flex-wrap: wrap; gap: 8px;
+    padding: 9px max(12px, env(safe-area-inset-left)) 9px max(12px, env(safe-area-inset-right));
+  }
+  .steps {
+    order: 1; width: 100%;
+    flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .steps::-webkit-scrollbar { display: none; }
+  .step { white-space: nowrap; font-size: 11.5px; }
+  .stagebar > div:not(.steps) { order: 2; }
+  .stagebar > button { order: 3; min-height: 42px; }
+  .stagebar > .btn:not(.ghost) { flex: 1 1 120px; }
+
+  .stage-head { gap: 10px; margin-bottom: 14px; }
+  .stage-head h1 { font-size: clamp(21px, 6vw, 28px); }
+
+  /* the game keeps its shape and scrolls inside its own box */
+  .gameframe { height: min(64vh, 420px); border-radius: 14px; }
+
+  /* tables are the one thing that cannot wrap sensibly */
+  .card > table, .table-wrap { display: block; width: 100%; overflow-x: auto; }
+  table { min-width: 460px; }
+
+  .item { flex-wrap: wrap; padding: 12px 13px; }
+  .item .grow { flex: 1 1 100%; }
+
+  .modal-back { padding: 0; align-items: flex-end; }
+  .modal {
+    width: 100%; max-height: 92vh; border-radius: 18px 18px 0 0;
+    padding-bottom: calc(18px + env(safe-area-inset-bottom));
+  }
+
+  .auth-wrap { padding: 16px; align-items: flex-start; padding-top: 8vh; }
+  .auth-card h1 { font-size: clamp(22px, 6.5vw, 30px); }
+
+  .picture-frame { max-height: 42vh; }
+  .feedback-out { font-size: 12.5px; padding: 14px; max-height: 50vh; }
+  .expansion-step { flex-wrap: wrap; }
+  .expansion-step .k { width: auto; }
+}
+
+/* Small phones — 360px and under. Nothing is dropped, only tightened. */
+@media (max-width: 380px) {
+  .page { padding-left: 11px; padding-right: 11px; }
+  .card { padding: 14px 12px; }
+  .btn { padding: 12px 14px; font-size: 14.5px; }
+  .topbar .logo { font-size: 14px; }
+  .badge { font-size: 10px; padding: 3px 7px; }
+  .step { font-size: 11px; padding: 5px 9px; }
+}
+
+/* Landscape on a phone: almost no height, so the tall things shrink
+   rather than pushing the controls off the bottom of the screen. */
+@media (max-height: 520px) and (orientation: landscape) {
+  .prompt-box { min-height: 0; padding: 12px 16px; font-size: 17px; }
+  .gameframe { height: 78vh; }
+  .timer { font-size: 26px; }
+  .auth-wrap { padding-top: 12px; }
+}
+
+/* A tap should not leave a grey flash box behind it on Android. */
+@media (hover: none) {
+  * { -webkit-tap-highlight-color: transparent; }
+  .btn:hover:not(:disabled), .item:hover, .chip:hover, .counter:hover { transform: none; filter: none; }
 }

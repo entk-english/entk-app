@@ -173,7 +173,6 @@ function draw() {
         'suggested ' + fmtTarget(m.target) + ' · edit</button></div>' +
       '<button class="btn ghost sm" data-adddrill title="Insert a drill after this stage">+ Drill</button>' +
       '<button class="btn ghost sm" data-dropstage title="Take this stage off today\'s bar">− Remove</button>' +
-      '<button class="themeBtn" data-theme-toggle title="Switch theme">☀</button>' +
       '<button class="btn ghost sm" data-back>Back</button>' +
       '<button class="btn" data-next>' + (S.idx === S.stages.length - 1 ? 'Finish' : 'Next stage') + '</button>' +
       '<button class="btn ghost sm" data-exit>Exit</button>' +
@@ -194,17 +193,6 @@ function draw() {
   S.root.innerHTML = '';
   S.root.appendChild(shell);
 
-  const themeBtn = $('[data-theme-toggle]', bar);
-  const paintThemeBtn = () => {
-    themeBtn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀' : '☾';
-  };
-  paintThemeBtn();
-  themeBtn.onclick = () => {
-    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    try { localStorage.setItem('ast:theme', next); } catch (e) {}
-    paintThemeBtn();
-  };
 
   /* Drills are chosen when the session is planned, but a trainer
      often only sees the need for one once the lesson is running. */
@@ -688,7 +676,7 @@ function stagePron(body) {
   body.appendChild(el(
     '<div class="card tight"><div class="row between">' +
       '<div><div class="eyebrow">Word list feeding the game</div>' +
-      '<div style="font-size:15px">' + words.map(w => '<span class="chip static" style="margin-right:6px">' + esc(w) + '</span>').join('') + '</div></div>' +
+      '<div class="chips" style="font-size:15px">' + words.map(w => '<span class="chip static">' + esc(w) + '</span>').join('') + '</div></div>' +
       '<div class="row"><button class="btn ghost sm" data-edit>Edit list</button><button class="btn ghost sm" data-reload>Restart game</button></div>' +
     '</div>' +
     (usingFallback ? '<div class="notice info" style="margin:14px 0 0">Nothing was harvested in stage 2, so this is a level ' + esc(S.trainee.level) + ' fallback list.</div>' : '') +

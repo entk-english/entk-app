@@ -34,4 +34,4 @@ export const APP_NAME = 'Entk Session Trainer';
 
 /* Bumped whenever the app files change. Shown on the sign-in screen
    so a stale browser cache is obvious rather than mysterious. */
-export const BUILD = 'b38';
+export const BUILD = 'b39';
