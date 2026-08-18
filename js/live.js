@@ -48,7 +48,9 @@ export function openLink(sessionId) {
   return {
     send(type, payload) {
       if (closed) return;
-      const msg = Object.assign({ type, from: SENDER, at: Date.now() }, payload || {});
+      /* the envelope wins: a payload carrying its own `type` must not
+         be able to rename the message and vanish from every listener */
+      const msg = Object.assign({}, payload || {}, { type, from: SENDER, at: Date.now() });
       if (bc) { try { bc.postMessage(msg); } catch (e) {} }
       if (sb) { try { sb.send({ type: 'broadcast', event: 'msg', payload: msg }); } catch (e) {} }
     },

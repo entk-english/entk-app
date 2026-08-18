@@ -668,7 +668,9 @@ async function sendRecordingOverWire(m) {
     for (let i = 0; i < total; i++) {
       liveLink.send('recording-chunk', {
         id, i, total, word: m.word, at: m.at,
-        type: m.blob.type || 'audio/webm',
+        /* not 'type' — that is the message's own field, and a payload
+           key of the same name would rename the message itself */
+        audioType: m.blob.type || 'audio/webm',
         part: b64.slice(i * WIRE_CHUNK, (i + 1) * WIRE_CHUNK)
       });
       /* a breath between chunks: the channel is shared with marks and

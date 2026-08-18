@@ -746,6 +746,32 @@ function stagePron(body) {
      does not survive JSON, so those takes stay in memory only. */
   const memTakes = [];
 
+  /* The newest take, and one way to play any of them. The trainer marks
+     with their ear, so the attempt has to be one tap away from the
+     verdict buttons — not somewhere further down the page. */
+  let newest = null;
+
+  async function playTake(take) {
+    if (!take) return;
+    try {
+      const src = take.blob ? URL.createObjectURL(take.blob) : await Store.recordingUrl(take.path);
+      const audio = new Audio(src);
+      audio.onerror = () => toast('That recording would not play.', 'err');
+      await audio.play();
+    } catch (e) { toast('Could not play it: ' + e.message, 'err'); }
+  }
+
+  function arrived(take) {
+    newest = take;
+    const btn = $('[data-hear]', verdictBar);
+    const label = $('#lasttake', verdictBar);
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = '“' + (take.word || '—') + '”, just now';
+    paintTakes();
+    const auto = $('#autohear', verdictBar);
+    if (auto && auto.checked) playTake(take);
+  }
+
   const paintTakes = () => {
     const rows = S.data.pron.recordings.concat(memTakes)
       .sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-12).reverse();
@@ -795,23 +821,27 @@ function stagePron(body) {
         const bin = atob(p.parts.join(''));
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        memTakes.push({ blob: new Blob([bytes], { type: msg.type || 'audio/webm' }),
-                        word: msg.word, at: msg.at || Date.now() });
-        paintTakes();
+        const take = { blob: new Blob([bytes], { type: msg.audioType || 'audio/webm' }),
+                       word: msg.word, at: msg.at || Date.now() };
+        memTakes.push(take);
+        arrived(take);
       } catch (e) { toast('A recording arrived damaged.', 'err'); }
       return;
     }
     if (msg.type === 'recording') {
       const take = { word: msg.word, at: msg.at || Date.now() };
+      let stored = null;
       if (msg.path) {
         /* a path outlives the session: it can be replayed from the
            history months later */
-        S.data.pron.recordings.push(Object.assign({ path: msg.path }, take));
+        stored = Object.assign({ path: msg.path }, take);
+        S.data.pron.recordings.push(stored);
         persist();
       } else if (msg.blob) {
-        memTakes.push(Object.assign({ blob: msg.blob }, take));
+        stored = Object.assign({ blob: msg.blob }, take);
+        memTakes.push(stored);
       }
-      paintTakes();
+      if (stored) arrived(stored);
     }
     if (msg.type === 'recording-failed') {
       toast('Their device could not upload "' + msg.word + '": ' + msg.reason, 'err');
@@ -846,9 +876,16 @@ function stagePron(body) {
      is all it does. */
   const verdictBar = el(
     '<div class="card tight" style="margin-top:12px">' +
+      '<div class="row between" style="margin-bottom:10px">' +
+        '<div class="row">' +
+          '<button class="btn gold" data-hear disabled style="font-size:16px">▶ Hear their last try</button>' +
+          '<span class="sub" id="lasttake" style="margin:0">Waiting for them to record…</span>' +
+        '</div>' +
+        '<label class="sub" style="margin:0;display:flex;align-items:center;gap:7px">' +
+          '<input type="checkbox" id="autohear" checked style="width:auto;min-height:0"> play it as it arrives</label>' +
+      '</div>' +
       '<div class="row between">' +
-        '<div class="sub" style="margin:0">Nothing happens in the game until you decide. ' +
-        'Keys <b>1</b> correct · <b>2</b> wrong.</div>' +
+        '<div class="sub" style="margin:0">Listen, then decide. Keys <b>1</b> correct · <b>2</b> wrong.</div>' +
         '<div class="row">' +
           '<button class="btn" data-good style="font-size:18px;padding:15px 34px">✓ Correct</button>' +
           '<button class="btn danger" data-bad style="font-size:18px;padding:15px 34px">✗ Wrong</button>' +
@@ -859,6 +896,7 @@ function stagePron(body) {
   body.appendChild(verdictBar);
   $('[data-good]', verdictBar).onclick = () => sendMark(true);
   $('[data-bad]', verdictBar).onclick = () => sendMark(false);
+  $('[data-hear]', verdictBar).onclick = () => playTake(newest);
   body.appendChild(takes);
 
   S.onLeave = () => { document.removeEventListener('keydown', keyMark); S.monitor = null; };
