@@ -163,11 +163,15 @@ function draw() {
   const m = meta(stage);
   const shell = el('<div class="session-shell"></div>');
 
+  /* Nine stages across the top was a wall of chips. One button now says
+     where you are, and opens the list to jump anywhere. */
   const bar = el(
     '<div class="stagebar">' +
-      '<div class="steps">' + S.stages.map((s, i) =>
-        '<span class="step ' + (i < S.idx ? 'done' : i === S.idx ? 'now' : '') + '">' +
-        (i + 1) + '. ' + esc(meta(s).title) + '</span>').join('') + '</div>' +
+      '<button class="stagepick" data-stages>' +
+        '<span class="stagepick-n">' + (S.idx + 1) + ' / ' + S.stages.length + '</span>' +
+        '<span class="stagepick-t">' + esc(m.title) + '</span>' +
+        '<span class="stagepick-c">▾</span>' +
+      '</button>' +
       '<div><div class="timer" id="clock">00:00</div>' +
         '<button class="timer-target" data-settarget title="Set your own length for this stage">' +
         'suggested ' + fmtTarget(m.target) + ' · edit</button></div>' +
@@ -265,6 +269,30 @@ function draw() {
     await persist();
     draw();
     toast(m.title + ' removed.');
+  };
+
+  /* The toolbox: every stage, where you are in it, and one tap to go. */
+  $('[data-stages]', bar).onclick = async () => {
+    const pick = await modal(
+      '<h2>Today’s stages</h2><p class="sub">Tap one to go straight there.</p>' +
+      '<div class="list">' + S.stages.map((st, i) =>
+        '<button class="stagerow' + (i === S.idx ? ' now' : i < S.idx ? ' done' : '') + '" data-goto="' + i + '">' +
+          '<span class="badge' + (i < S.idx ? ' level' : '') + '">' + (i + 1) + '</span>' +
+          '<span class="grow">' + esc(meta(st).title) + '</span>' +
+          (i === S.idx ? '<span class="badge level">here</span>' : '') +
+        '</button>').join('') + '</div>' +
+      '<div class="row" style="margin-top:16px"><button class="btn ghost" data-cancel>Close</button></div>',
+      (card, close) => {
+        $$('[data-goto]', card).forEach(b => b.onclick = () => close(Number(b.dataset.goto)));
+        $('[data-cancel]', card).onclick = () => close(null);
+      }
+    );
+    if (pick === null || pick === S.idx) return;
+    if (S.onLeave) { try { S.onLeave(); } catch (e) {} S.onLeave = null; }
+    S.idx = pick;
+    persist();
+    await flush();
+    draw();
   };
 
   $('[data-next]', bar).onclick = () => advance(1);
@@ -451,25 +479,41 @@ function stageWarmup(body) {
     }
 
     card.innerHTML =
-      '<div class="chips" style="margin-bottom:18px">' +
+      /* Each part of this screen does a different job, so each gets its
+         own air and its own line. Choosing a format, reading the prompt
+         aloud, and writing your own question are three separate acts,
+         and they were sitting on top of one another. */
+      '<div class="eyebrow">Format</div>' +
+      '<div class="chips">' +
         WARMUP_FORMATS.map(f => '<span class="chip' + (f.id === format ? ' on' : '') + '" data-f="' + f.id + '">' + esc(f.name) + '</span>').join('') +
       '</div>' +
-      '<div class="prompt-box" id="wprompt">' + promptHTML + '</div>' +
-      '<p class="sub" style="margin:14px 0 0">' + esc(def.hint) + '</p>' +
-      '<div class="row" style="margin-top:14px"><button class="btn sm" data-again>Next prompt</button>' +
-      '<span class="badge">' + bank.length + ' in the pool</span>' +
-      '<span class="badge">rotation suggests: ' + esc(rotation.name) + '</span></div>' +
-      '<div class="field" style="margin-top:16px"><label>Your own question or sentence — it goes straight to their screen</label>' +
-        '<div class="row"><input id="own-in" placeholder="Type it and press Enter" style="flex:1;min-width:220px">' +
-        '<button class="btn sm" data-addown>Send &amp; keep</button>' +
-        '<button class="btn ghost sm" data-sendown>Send once</button></div></div>' +
-      (mine.length
-        ? '<div class="eyebrow" style="margin-top:6px">Yours — tap one to put it on their screen</div>' +
-          '<div class="chips">' + mine.map((p, i) =>
-            '<span class="chip gold" data-useown="' + i + '">' + esc(p) +
-            ' <button data-delown="' + i + '" title="remove" style="background:none;border:none;color:inherit;cursor:pointer;padding:0 0 0 5px">×</button></span>'
-          ).join('') + '</div>'
-        : '');
+
+      '<div style="margin-top:30px"><div class="prompt-box" id="wprompt">' + promptHTML + '</div>' +
+      '<p class="sub" style="margin:16px 0 0;text-align:center">' + esc(def.hint) + '</p></div>' +
+
+      '<hr class="divider" style="margin:30px 0 24px">' +
+
+      '<div class="row" style="gap:18px">' +
+        '<button class="btn sm" data-again>Next prompt</button>' +
+        '<span class="badge">' + bank.length + ' in the pool</span>' +
+        '<span class="badge">rotation suggests: ' + esc(rotation.name) + '</span>' +
+      '</div>' +
+
+      '<div class="section-apart">' +
+        '<div class="eyebrow">Your own question or sentence — it goes straight to their screen</div>' +
+        '<div class="row" style="margin-top:12px">' +
+          '<input id="own-in" placeholder="Type it and press Enter" style="flex:1 1 240px;min-width:0">' +
+          '<button class="btn sm" data-addown>Send &amp; keep</button>' +
+          '<button class="btn ghost sm" data-sendown>Send once</button>' +
+        '</div>' +
+        (mine.length
+          ? '<div class="eyebrow" style="margin-top:26px">Yours — tap one to put it on their screen</div>' +
+            '<div class="chips">' + mine.map((p, i) =>
+              '<span class="chip gold" data-useown="' + i + '">' + esc(p) +
+              ' <button data-delown="' + i + '" title="remove" style="background:none;border:none;color:inherit;cursor:pointer;padding:0 0 0 7px;font-size:15px">×</button></span>'
+            ).join('') + '</div>'
+          : '') +
+      '</div>';
 
     publish({ kind: 'warmup', format: def.name, hint: def.hint, prompt: shown });
 
